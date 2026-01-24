@@ -1,0 +1,309 @@
+package com.example.javaparser;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import com.github.javaparser.JavaParser;
+import com.github.javaparser.ParseResult;
+import com.github.javaparser.ParserConfiguration;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.ImportDeclaration;
+import com.github.javaparser.ast.Modifier;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.FieldDeclaration;
+import com.github.javaparser.ast.body.TypeDeclaration;
+import com.github.javaparser.symbolsolver.JavaSymbolSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
+
+@Component
+public class JavaModifierProcessor {
+    private static final Logger log = LoggerFactory.getLogger(JavaModifierProcessor.class);
+
+    public List<FileChangePlan> analyze(Path inputRoot) throws IOException {
+        if (!Files.isDirectory(inputRoot)) {
+            throw new IOException("Input path is not a directory: " + inputRoot);
+        }
+
+        JavaParser parser = buildParser(inputRoot);
+        List<FileChangePlan> plans = new ArrayList<>();
+
+        try (java.util.stream.Stream<Path> paths = Files.walk(inputRoot)) {
+            paths.filter(path -> path.toString().endsWith(".java"))
+                .forEach(path -> {
+                    FileChangePlan plan = analyzeFile(parser, inputRoot, path);
+                    if (plan != null && plan.hasChanges()) {
+                        plans.add(plan);
+                    }
+                });
+        } catch (UncheckedIOException ex) {
+            throw ex.getCause();
+        }
+
+        plans.sort(Comparator.comparing(plan -> plan.getRelativePath().toString()));
+        return plans;
+    }
+
+    public void process(Path inputRoot, Path outputRoot) throws IOException {
+        if (!Files.isDirectory(inputRoot)) {
+            throw new IOException("Input path is not a directory: " + inputRoot);
+        }
+        Files.createDirectories(outputRoot);
+
+        JavaParser parser = buildParser(inputRoot);
+
+        try (java.util.stream.Stream<Path> paths = Files.walk(inputRoot)) {
+            paths.filter(path -> path.toString().endsWith(".java"))
+                .forEach(path -> processFile(parser, inputRoot, outputRoot, path));
+        } catch (UncheckedIOException ex) {
+            throw ex.getCause();
+        }
+    }
+
+    public void applySingle(Path inputRoot, Path outputRoot, Path sourceFile) throws IOException {
+        if (!Files.isDirectory(inputRoot)) {
+            throw new IOException("Input path is not a directory: " + inputRoot);
+        }
+        Files.createDirectories(outputRoot);
+
+        JavaParser parser = buildParser(inputRoot);
+        processFile(parser, inputRoot, outputRoot, sourceFile);
+    }
+
+    public List<OutputFilePreview> previewOutputs(Path inputRoot, Path sourceFile) throws IOException {
+        if (!Files.isDirectory(inputRoot)) {
+            throw new IOException("Input path is not a directory: " + inputRoot);
+        }
+
+        JavaParser parser = buildParser(inputRoot);
+        return buildOutputs(parser, inputRoot, sourceFile);
+    }
+
+    private JavaParser buildParser(Path inputRoot) {
+        CombinedTypeSolver typeSolver = new CombinedTypeSolver();
+        typeSolver.add(new ReflectionTypeSolver());
+        typeSolver.add(new JavaParserTypeSolver(inputRoot.toFile()));
+
+        ParserConfiguration configuration = new ParserConfiguration();
+        configuration.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+        configuration.setSymbolResolver(new JavaSymbolSolver(typeSolver));
+
+        return new JavaParser(configuration);
+    }
+
+    private FileChangePlan analyzeFile(JavaParser parser, Path inputRoot, Path sourceFile) {
+        ParseResult<CompilationUnit> result;
+        try {
+            result = parser.parse(sourceFile);
+        } catch (IOException ex) {
+            throw new UncheckedIOException(ex);
+        }
+
+        if (result.getResult().isEmpty()) {
+            log.warn("Parse failed: {}", sourceFile);
+            result.getProblems().forEach(problem -> log.warn("  {}", problem.getMessage()));
+            return null;
+        }
+
+        CompilationUnit cu = result.getResult().get();
+        List<ClassOrInterfaceDeclaration> topLevelClasses = getTopLevelClasses(cu);
+        boolean hasPublicClass = topLevelClasses.stream().anyMatch(ClassOrInterfaceDeclaration::isPublic);
+        boolean onlyClasses = isOnlyTopLevelClasses(cu);
+
+        SplitMode splitMode = SplitMode.NONE;
+        ClassOrInterfaceDeclaration primary = null;
+        if (!hasPublicClass && onlyClasses && !topLevelClasses.isEmpty()) {
+            splitMode = SplitMode.SPLIT_ALL;
+        } else if (hasPublicClass && topLevelClasses.size() > 1) {
+            splitMode = SplitMode.SPLIT_OTHERS;
+            primary = topLevelClasses.stream()
+                .filter(ClassOrInterfaceDeclaration::isPublic)
+                .findFirst()
+                .orElse(topLevelClasses.get(0));
+        }
+
+        List<ClassChangePlan> classPlans = new ArrayList<>();
+        for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
+            boolean moveToNewFile = splitMode == SplitMode.SPLIT_ALL
+                || (splitMode == SplitMode.SPLIT_OTHERS && clazz != primary);
+            boolean addPublic = !clazz.isPublic();
+            List<FieldChangePlan> fieldChanges = collectFieldChanges(clazz);
+            classPlans.add(new ClassChangePlan(clazz.getNameAsString(), moveToNewFile, addPublic, fieldChanges));
+        }
+
+        Path relative = inputRoot.relativize(sourceFile);
+        String primaryName = primary == null ? null : primary.getNameAsString();
+        return new FileChangePlan(sourceFile, relative, splitMode, primaryName, classPlans);
+    }
+
+    private void processFile(JavaParser parser, Path inputRoot, Path outputRoot, Path sourceFile) {
+        try {
+            List<OutputFilePreview> outputs = buildOutputs(parser, inputRoot, sourceFile);
+            writeOutputs(outputs, outputRoot);
+        } catch (IOException ex) {
+            throw new UncheckedIOException(ex);
+        }
+    }
+
+    private boolean isOnlyTopLevelClasses(CompilationUnit cu) {
+        List<TypeDeclaration<?>> types = cu.getTypes();
+        if (types.isEmpty()) {
+            return false;
+        }
+        for (TypeDeclaration<?> type : types) {
+            if (!(type instanceof ClassOrInterfaceDeclaration)) {
+                return false;
+            }
+            ClassOrInterfaceDeclaration clazz = (ClassOrInterfaceDeclaration) type;
+            if (clazz.isInterface()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private List<ClassOrInterfaceDeclaration> getTopLevelClasses(CompilationUnit cu) {
+        return cu.getTypes().stream()
+            .filter(type -> type instanceof ClassOrInterfaceDeclaration)
+            .map(type -> (ClassOrInterfaceDeclaration) type)
+            .filter(type -> !type.isInterface())
+            .toList();
+    }
+
+    private void ensurePublic(ClassOrInterfaceDeclaration clazz) {
+        if (!clazz.isPublic()) {
+            clazz.addModifier(Modifier.Keyword.PUBLIC);
+        }
+    }
+
+    private void updateFieldModifiers(ClassOrInterfaceDeclaration clazz) {
+        for (FieldDeclaration field : clazz.getFields()) {
+            if (field.isPrivate() || field.isProtected()) {
+                field.removeModifier(Modifier.Keyword.PRIVATE);
+                field.removeModifier(Modifier.Keyword.PROTECTED);
+                field.addModifier(Modifier.Keyword.PUBLIC);
+            }
+        }
+    }
+
+    private List<FieldChangePlan> collectFieldChanges(ClassOrInterfaceDeclaration clazz) {
+        List<FieldChangePlan> changes = new ArrayList<>();
+        for (FieldDeclaration field : clazz.getFields()) {
+            if (field.isPrivate() || field.isProtected()) {
+                String from = field.isPrivate() ? "private" : "protected";
+                List<String> names = field.getVariables().stream()
+                    .map(variable -> variable.getNameAsString())
+                    .toList();
+                changes.add(new FieldChangePlan(from, names));
+            }
+        }
+        return changes;
+    }
+
+    private List<OutputFilePreview> buildOutputs(JavaParser parser, Path inputRoot, Path sourceFile) {
+        ParseResult<CompilationUnit> result;
+        try {
+            result = parser.parse(sourceFile);
+        } catch (IOException ex) {
+            throw new UncheckedIOException(ex);
+        }
+
+        if (result.getResult().isEmpty()) {
+            log.warn("Parse failed: {}", sourceFile);
+            result.getProblems().forEach(problem -> log.warn("  {}", problem.getMessage()));
+            return List.of();
+        }
+
+        CompilationUnit cu = result.getResult().get();
+        List<ClassOrInterfaceDeclaration> topLevelClasses = getTopLevelClasses(cu);
+        boolean hasPublicClass = topLevelClasses.stream().anyMatch(ClassOrInterfaceDeclaration::isPublic);
+        boolean onlyClasses = isOnlyTopLevelClasses(cu);
+
+        for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
+            updateFieldModifiers(clazz);
+        }
+
+        Path relative = inputRoot.relativize(sourceFile);
+        Path relativeParent = relative.getParent();
+        List<OutputFilePreview> outputs = new ArrayList<>();
+
+        if (!hasPublicClass && onlyClasses && !topLevelClasses.isEmpty()) {
+            for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
+                ensurePublic(clazz);
+            }
+            for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
+                CompilationUnit newCu = buildSplitUnit(cu, clazz);
+                Path outputRelative = relativeParent == null
+                    ? Path.of(clazz.getNameAsString() + ".java")
+                    : relativeParent.resolve(clazz.getNameAsString() + ".java");
+                outputs.add(new OutputFilePreview(outputRelative, newCu.toString()));
+            }
+            return outputs;
+        }
+
+        if (hasPublicClass && topLevelClasses.size() > 1) {
+            ClassOrInterfaceDeclaration primary = topLevelClasses.stream()
+                .filter(ClassOrInterfaceDeclaration::isPublic)
+                .findFirst()
+                .orElse(topLevelClasses.get(0));
+            ensurePublic(primary);
+
+            List<ClassOrInterfaceDeclaration> toMove = topLevelClasses.stream()
+                .filter(clazz -> clazz != primary)
+                .toList();
+            for (ClassOrInterfaceDeclaration clazz : toMove) {
+                ensurePublic(clazz);
+            }
+            for (ClassOrInterfaceDeclaration clazz : toMove) {
+                CompilationUnit newCu = buildSplitUnit(cu, clazz);
+                Path outputRelative = relativeParent == null
+                    ? Path.of(clazz.getNameAsString() + ".java")
+                    : relativeParent.resolve(clazz.getNameAsString() + ".java");
+                outputs.add(new OutputFilePreview(outputRelative, newCu.toString()));
+            }
+            for (ClassOrInterfaceDeclaration clazz : toMove) {
+                clazz.remove();
+            }
+            outputs.add(new OutputFilePreview(relative, cu.toString()));
+            return outputs;
+        }
+
+        for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
+            ensurePublic(clazz);
+        }
+        outputs.add(new OutputFilePreview(relative, cu.toString()));
+        return outputs;
+    }
+
+    private CompilationUnit buildSplitUnit(CompilationUnit originalCu, ClassOrInterfaceDeclaration clazz) {
+        CompilationUnit newCu = new CompilationUnit();
+        originalCu.getPackageDeclaration().ifPresent(pkg -> newCu.setPackageDeclaration(pkg.clone()));
+        for (ImportDeclaration importDecl : originalCu.getImports()) {
+            newCu.addImport(importDecl.clone());
+        }
+        newCu.addType(clazz.clone());
+        return newCu;
+    }
+
+    private void writeOutputs(List<OutputFilePreview> outputs, Path outputRoot) throws IOException {
+        for (OutputFilePreview output : outputs) {
+            Path outputFile = outputRoot.resolve(output.getRelativePath());
+            Path parent = outputFile.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.writeString(outputFile, output.getContent(), StandardCharsets.UTF_8);
+        }
+    }
+}
