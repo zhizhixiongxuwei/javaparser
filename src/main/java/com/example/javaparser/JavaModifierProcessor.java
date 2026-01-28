@@ -11,8 +11,6 @@ import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ParserConfiguration;
@@ -27,7 +25,6 @@ import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSol
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 
-@Component
 public class JavaModifierProcessor {
     private static final Logger log = LoggerFactory.getLogger(JavaModifierProcessor.class);
 
@@ -56,6 +53,10 @@ public class JavaModifierProcessor {
     }
 
     public void process(Path inputRoot, Path outputRoot) throws IOException {
+        process(inputRoot, outputRoot, OutputConflictStrategy.OVERWRITE);
+    }
+
+    public void process(Path inputRoot, Path outputRoot, OutputConflictStrategy conflictStrategy) throws IOException {
         if (!Files.isDirectory(inputRoot)) {
             throw new IOException("Input path is not a directory: " + inputRoot);
         }
@@ -65,20 +66,25 @@ public class JavaModifierProcessor {
 
         try (java.util.stream.Stream<Path> paths = Files.walk(inputRoot)) {
             paths.filter(path -> path.toString().endsWith(".java"))
-                .forEach(path -> processFile(parser, inputRoot, outputRoot, path));
+                .forEach(path -> processFile(parser, inputRoot, outputRoot, path, conflictStrategy));
         } catch (UncheckedIOException ex) {
             throw ex.getCause();
         }
     }
 
     public void applySingle(Path inputRoot, Path outputRoot, Path sourceFile) throws IOException {
+        applySingle(inputRoot, outputRoot, sourceFile, OutputConflictStrategy.OVERWRITE);
+    }
+
+    public void applySingle(Path inputRoot, Path outputRoot, Path sourceFile, OutputConflictStrategy conflictStrategy)
+        throws IOException {
         if (!Files.isDirectory(inputRoot)) {
             throw new IOException("Input path is not a directory: " + inputRoot);
         }
         Files.createDirectories(outputRoot);
 
         JavaParser parser = buildParser(inputRoot);
-        processFile(parser, inputRoot, outputRoot, sourceFile);
+        processFile(parser, inputRoot, outputRoot, sourceFile, conflictStrategy);
     }
 
     public List<OutputFilePreview> previewOutputs(Path inputRoot, Path sourceFile) throws IOException {
@@ -105,6 +111,7 @@ public class JavaModifierProcessor {
     private FileChangePlan analyzeFile(JavaParser parser, Path inputRoot, Path sourceFile) {
         ParseResult<CompilationUnit> result;
         try {
+            log.debug("Analyzing {}", sourceFile);
             result = parser.parse(sourceFile);
         } catch (IOException ex) {
             throw new UncheckedIOException(ex);
@@ -114,6 +121,9 @@ public class JavaModifierProcessor {
             log.warn("Parse failed: {}", sourceFile);
             result.getProblems().forEach(problem -> log.warn("  {}", problem.getMessage()));
             return null;
+        }
+        if (!result.getProblems().isEmpty()) {
+            log.debug("Parse warnings for {}: {}", sourceFile, result.getProblems());
         }
 
         CompilationUnit cu = result.getResult().get();
@@ -147,10 +157,16 @@ public class JavaModifierProcessor {
         return new FileChangePlan(sourceFile, relative, splitMode, primaryName, classPlans);
     }
 
-    private void processFile(JavaParser parser, Path inputRoot, Path outputRoot, Path sourceFile) {
+    private void processFile(
+        JavaParser parser,
+        Path inputRoot,
+        Path outputRoot,
+        Path sourceFile,
+        OutputConflictStrategy conflictStrategy
+    ) {
         try {
             List<OutputFilePreview> outputs = buildOutputs(parser, inputRoot, sourceFile);
-            writeOutputs(outputs, outputRoot);
+            writeOutputs(outputs, outputRoot, conflictStrategy);
         } catch (IOException ex) {
             throw new UncheckedIOException(ex);
         }
@@ -214,6 +230,7 @@ public class JavaModifierProcessor {
     private List<OutputFilePreview> buildOutputs(JavaParser parser, Path inputRoot, Path sourceFile) {
         ParseResult<CompilationUnit> result;
         try {
+            log.debug("Processing {}", sourceFile);
             result = parser.parse(sourceFile);
         } catch (IOException ex) {
             throw new UncheckedIOException(ex);
@@ -223,6 +240,9 @@ public class JavaModifierProcessor {
             log.warn("Parse failed: {}", sourceFile);
             result.getProblems().forEach(problem -> log.warn("  {}", problem.getMessage()));
             return List.of();
+        }
+        if (!result.getProblems().isEmpty()) {
+            log.debug("Parse warnings for {}: {}", sourceFile, result.getProblems());
         }
 
         CompilationUnit cu = result.getResult().get();
@@ -296,9 +316,17 @@ public class JavaModifierProcessor {
         return newCu;
     }
 
-    private void writeOutputs(List<OutputFilePreview> outputs, Path outputRoot) throws IOException {
+    private void writeOutputs(
+        List<OutputFilePreview> outputs,
+        Path outputRoot,
+        OutputConflictStrategy conflictStrategy
+    ) throws IOException {
         for (OutputFilePreview output : outputs) {
             Path outputFile = outputRoot.resolve(output.getRelativePath());
+            if (Files.exists(outputFile) && conflictStrategy == OutputConflictStrategy.SKIP_EXISTING) {
+                log.info("Skipping existing output: {}", outputFile);
+                continue;
+            }
             Path parent = outputFile.getParent();
             if (parent != null) {
                 Files.createDirectories(parent);

@@ -1,6 +1,6 @@
 # javaparser-modifier
 
-A Spring Boot CLI and JavaFX GUI that rewrites Java source files using JavaParser 3.28.0.
+A JavaFX GUI that rewrites Java source files using JavaParser 3.28.0, styled with MaterialFX.
 
 ## Requirements
 
@@ -13,16 +13,17 @@ mvn -DskipTests package
 
 ## Run
 
-java -jar target/javaparser-modifier-0.0.1-SNAPSHOT.jar <inputDir> <outputDir>
-
-## Run GUI
-
 mvn -DskipTests javafx:run
+
+Tip: pass `--verbose` to enable debug logging, or toggle "Verbose logs" in the UI.
 
 Note: `javafx.platform` is set to `win` in `pom.xml`. Change it for other OSes if needed.
 
 The GUI only scans and lists changes until you click "Apply Selected" or "Apply All". It also shows a
 line-numbered, character-highlighted original vs modified preview in the Diff tab.
+Use the "Diff split" slider in the bottom toolbar to adjust left/right preview widths; the setting
+is saved to `~/.javaparser-modifier/gui.properties`.
+Use the "Theme" selector to switch between Light, Dark, and Neon styles (also persisted).
 
 ## Behavior
 
