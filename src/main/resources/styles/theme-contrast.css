@@ -1,0 +1,100 @@
+.root {
+    -fx-font-family: "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
+    -fx-base: #ffffff;
+    -fx-background: #ffffff;
+    -fx-background-color: #ffffff;
+    -fx-control-inner-background: #ffffff;
+    -fx-accent: #0057ff;
+    -fx-focus-color: #0057ff;
+    -fx-faint-focus-color: rgba(0, 87, 255, 0.35);
+    -fx-text-fill: #000000;
+}
+
+.label {
+    -fx-text-fill: #000000;
+}
+
+.button {
+    -fx-background-radius: 6;
+    -fx-border-radius: 6;
+    -fx-padding: 6 14;
+    -fx-background-color: #ffffff;
+    -fx-border-color: #000000;
+    -fx-text-fill: #000000;
+}
+
+.button:hover {
+    -fx-background-color: #f2f2f2;
+    -fx-border-color: #000000;
+}
+
+.button:pressed {
+    -fx-background-color: #e6e6e6;
+}
+
+.text-field,
+.text-area,
+.combo-box,
+.list-view,
+.tab-pane,
+.split-pane,
+.scroll-pane {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #000000;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.list-cell {
+    -fx-text-fill: #000000;
+    -fx-background-color: transparent;
+}
+
+.list-cell:filled:selected,
+.list-cell:filled:selected:focused {
+    -fx-background-color: #000000;
+    -fx-text-fill: #ffffff;
+}
+
+.tab-pane .tab-header-area {
+    -fx-background-color: #ffffff;
+}
+
+.tab-pane .tab {
+    -fx-background-color: transparent;
+    -fx-padding: 6 12;
+}
+
+.tab-pane .tab:selected {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #000000;
+    -fx-border-width: 0 0 2 0;
+}
+
+.check-box .box {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #000000;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+}
+
+.check-box:selected .mark {
+    -fx-background-color: #000000;
+}
+
+.slider .track {
+    -fx-background-color: #000000;
+}
+
+.slider .thumb {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #000000;
+    -fx-border-width: 2;
+}
+
+.cool-dialog {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #000000;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+}

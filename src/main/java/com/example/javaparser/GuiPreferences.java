@@ -10,6 +10,9 @@ import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Persists GUI settings in a user-level properties file.
+ */
 public final class GuiPreferences {
     private static final Logger log = LoggerFactory.getLogger(GuiPreferences.class);
     private static final String CONFIG_DIR = ".javaparser-modifier";
@@ -19,10 +22,16 @@ public final class GuiPreferences {
 
     private final Path configPath;
 
+    /**
+     * Create a new preferences helper and resolve its config path.
+     */
     public GuiPreferences() {
         this.configPath = resolveConfigPath();
     }
 
+    /**
+     * Load the diff split ratio or return the provided fallback.
+     */
     public double loadDiffSplitRatio(double fallback) {
         Properties properties = loadProperties();
         String value = properties.getProperty(KEY_DIFF_SPLIT_RATIO);
@@ -37,12 +46,18 @@ public final class GuiPreferences {
         }
     }
 
+    /**
+     * Persist the current diff split ratio.
+     */
     public void saveDiffSplitRatio(double ratio) {
         Properties properties = loadProperties();
         properties.setProperty(KEY_DIFF_SPLIT_RATIO, Double.toString(ratio));
         saveProperties(properties);
     }
 
+    /**
+     * Load the stored theme name or return the provided fallback.
+     */
     public String loadTheme(String fallback) {
         Properties properties = loadProperties();
         String value = properties.getProperty(KEY_THEME);
@@ -52,6 +67,9 @@ public final class GuiPreferences {
         return value.trim();
     }
 
+    /**
+     * Persist a theme name if it is non-empty.
+     */
     public void saveTheme(String theme) {
         if (theme == null || theme.isBlank()) {
             return;
@@ -61,6 +79,9 @@ public final class GuiPreferences {
         saveProperties(properties);
     }
 
+    /**
+     * Load properties from disk, returning an empty set if none exist.
+     */
     private Properties loadProperties() {
         Properties properties = new Properties();
         if (!Files.exists(configPath)) {
@@ -74,6 +95,9 @@ public final class GuiPreferences {
         return properties;
     }
 
+    /**
+     * Write properties to disk, creating the config directory if needed.
+     */
     private void saveProperties(Properties properties) {
         try {
             Files.createDirectories(configPath.getParent());
@@ -85,6 +109,9 @@ public final class GuiPreferences {
         }
     }
 
+    /**
+     * Resolve the platform-specific config path (defaults to user home).
+     */
     private static Path resolveConfigPath() {
         String home = System.getProperty("user.home");
         Path dir = home == null || home.isBlank()

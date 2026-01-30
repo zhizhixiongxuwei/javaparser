@@ -25,9 +25,22 @@ import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSol
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 
+/**
+ * Core processor that parses Java source trees and produces or applies modifier changes.
+ * <p>
+ * Behavior overview:
+ * <ul>
+ *   <li>Ensure top-level classes are {@code public}.</li>
+ *   <li>Promote {@code private}/{@code protected} fields in top-level classes to {@code public}.</li>
+ *   <li>Split files into multiple files when multiple top-level classes exist.</li>
+ * </ul>
+ */
 public class JavaModifierProcessor {
     private static final Logger log = LoggerFactory.getLogger(JavaModifierProcessor.class);
 
+    /**
+     * Scan the input directory and return change plans for files that require modifications.
+     */
     public List<FileChangePlan> analyze(Path inputRoot) throws IOException {
         if (!Files.isDirectory(inputRoot)) {
             throw new IOException("Input path is not a directory: " + inputRoot);
@@ -52,10 +65,16 @@ public class JavaModifierProcessor {
         return plans;
     }
 
+    /**
+     * Process all Java files and write outputs, overwriting existing files.
+     */
     public void process(Path inputRoot, Path outputRoot) throws IOException {
         process(inputRoot, outputRoot, OutputConflictStrategy.OVERWRITE);
     }
 
+    /**
+     * Process all Java files and write outputs using the selected conflict strategy.
+     */
     public void process(Path inputRoot, Path outputRoot, OutputConflictStrategy conflictStrategy) throws IOException {
         if (!Files.isDirectory(inputRoot)) {
             throw new IOException("Input path is not a directory: " + inputRoot);
@@ -72,10 +91,16 @@ public class JavaModifierProcessor {
         }
     }
 
+    /**
+     * Apply changes for a single source file, overwriting existing outputs.
+     */
     public void applySingle(Path inputRoot, Path outputRoot, Path sourceFile) throws IOException {
         applySingle(inputRoot, outputRoot, sourceFile, OutputConflictStrategy.OVERWRITE);
     }
 
+    /**
+     * Apply changes for a single source file using the chosen conflict strategy.
+     */
     public void applySingle(Path inputRoot, Path outputRoot, Path sourceFile, OutputConflictStrategy conflictStrategy)
         throws IOException {
         if (!Files.isDirectory(inputRoot)) {
@@ -87,6 +112,9 @@ public class JavaModifierProcessor {
         processFile(parser, inputRoot, outputRoot, sourceFile, conflictStrategy);
     }
 
+    /**
+     * Build output previews for a single file without writing to disk.
+     */
     public List<OutputFilePreview> previewOutputs(Path inputRoot, Path sourceFile) throws IOException {
         if (!Files.isDirectory(inputRoot)) {
             throw new IOException("Input path is not a directory: " + inputRoot);
@@ -96,6 +124,9 @@ public class JavaModifierProcessor {
         return buildOutputs(parser, inputRoot, sourceFile);
     }
 
+    /**
+     * Build a JavaParser instance with symbol solving configured for the input tree.
+     */
     private JavaParser buildParser(Path inputRoot) {
         CombinedTypeSolver typeSolver = new CombinedTypeSolver();
         typeSolver.add(new ReflectionTypeSolver());
@@ -108,6 +139,9 @@ public class JavaModifierProcessor {
         return new JavaParser(configuration);
     }
 
+    /**
+     * Parse a file and compute how it should be split and modified.
+     */
     private FileChangePlan analyzeFile(JavaParser parser, Path inputRoot, Path sourceFile) {
         ParseResult<CompilationUnit> result;
         try {
@@ -131,6 +165,7 @@ public class JavaModifierProcessor {
         boolean hasPublicClass = topLevelClasses.stream().anyMatch(ClassOrInterfaceDeclaration::isPublic);
         boolean onlyClasses = isOnlyTopLevelClasses(cu);
 
+        // Decide whether to split the file based on top-level class visibility.
         SplitMode splitMode = SplitMode.NONE;
         ClassOrInterfaceDeclaration primary = null;
         if (!hasPublicClass && onlyClasses && !topLevelClasses.isEmpty()) {
@@ -143,6 +178,7 @@ public class JavaModifierProcessor {
                 .orElse(topLevelClasses.get(0));
         }
 
+        // Build a per-class plan for public modifier changes and splitting decisions.
         List<ClassChangePlan> classPlans = new ArrayList<>();
         for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
             boolean moveToNewFile = splitMode == SplitMode.SPLIT_ALL
@@ -157,6 +193,9 @@ public class JavaModifierProcessor {
         return new FileChangePlan(sourceFile, relative, splitMode, primaryName, classPlans);
     }
 
+    /**
+     * Build outputs for a single file and write them to the output directory.
+     */
     private void processFile(
         JavaParser parser,
         Path inputRoot,
@@ -172,6 +211,9 @@ public class JavaModifierProcessor {
         }
     }
 
+    /**
+     * @return true if the compilation unit only contains top-level (non-interface) classes.
+     */
     private boolean isOnlyTopLevelClasses(CompilationUnit cu) {
         List<TypeDeclaration<?>> types = cu.getTypes();
         if (types.isEmpty()) {
@@ -189,6 +231,9 @@ public class JavaModifierProcessor {
         return true;
     }
 
+    /**
+     * @return all top-level, non-interface classes in declaration order.
+     */
     private List<ClassOrInterfaceDeclaration> getTopLevelClasses(CompilationUnit cu) {
         return cu.getTypes().stream()
             .filter(type -> type instanceof ClassOrInterfaceDeclaration)
@@ -197,12 +242,18 @@ public class JavaModifierProcessor {
             .toList();
     }
 
+    /**
+     * Ensure the class declaration is public.
+     */
     private void ensurePublic(ClassOrInterfaceDeclaration clazz) {
         if (!clazz.isPublic()) {
             clazz.addModifier(Modifier.Keyword.PUBLIC);
         }
     }
 
+    /**
+     * Promote private/protected fields in a class to public.
+     */
     private void updateFieldModifiers(ClassOrInterfaceDeclaration clazz) {
         for (FieldDeclaration field : clazz.getFields()) {
             if (field.isPrivate() || field.isProtected()) {
@@ -213,6 +264,9 @@ public class JavaModifierProcessor {
         }
     }
 
+    /**
+     * Collect a summary of field modifier changes for reporting.
+     */
     private List<FieldChangePlan> collectFieldChanges(ClassOrInterfaceDeclaration clazz) {
         List<FieldChangePlan> changes = new ArrayList<>();
         for (FieldDeclaration field : clazz.getFields()) {
@@ -227,6 +281,9 @@ public class JavaModifierProcessor {
         return changes;
     }
 
+    /**
+     * Build the output file list and content for a single source file.
+     */
     private List<OutputFilePreview> buildOutputs(JavaParser parser, Path inputRoot, Path sourceFile) {
         ParseResult<CompilationUnit> result;
         try {
@@ -250,6 +307,7 @@ public class JavaModifierProcessor {
         boolean hasPublicClass = topLevelClasses.stream().anyMatch(ClassOrInterfaceDeclaration::isPublic);
         boolean onlyClasses = isOnlyTopLevelClasses(cu);
 
+        // Apply field modifier changes in-place before any splitting logic.
         for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
             updateFieldModifiers(clazz);
         }
@@ -258,6 +316,7 @@ public class JavaModifierProcessor {
         Path relativeParent = relative.getParent();
         List<OutputFilePreview> outputs = new ArrayList<>();
 
+        // Case 1: no public class, only classes -> split all classes into separate files.
         if (!hasPublicClass && onlyClasses && !topLevelClasses.isEmpty()) {
             for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
                 ensurePublic(clazz);
@@ -272,6 +331,7 @@ public class JavaModifierProcessor {
             return outputs;
         }
 
+        // Case 2: has a public class and additional top-level classes -> move non-primary classes.
         if (hasPublicClass && topLevelClasses.size() > 1) {
             ClassOrInterfaceDeclaration primary = topLevelClasses.stream()
                 .filter(ClassOrInterfaceDeclaration::isPublic)
@@ -299,6 +359,7 @@ public class JavaModifierProcessor {
             return outputs;
         }
 
+        // Case 3: single class or no split needed -> keep file, ensure class is public.
         for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
             ensurePublic(clazz);
         }
@@ -306,6 +367,9 @@ public class JavaModifierProcessor {
         return outputs;
     }
 
+    /**
+     * Create a new compilation unit containing only the given class and cloned imports/package.
+     */
     private CompilationUnit buildSplitUnit(CompilationUnit originalCu, ClassOrInterfaceDeclaration clazz) {
         CompilationUnit newCu = new CompilationUnit();
         originalCu.getPackageDeclaration().ifPresent(pkg -> newCu.setPackageDeclaration(pkg.clone()));
@@ -316,6 +380,9 @@ public class JavaModifierProcessor {
         return newCu;
     }
 
+    /**
+     * Write each output file to disk, optionally skipping existing files.
+     */
     private void writeOutputs(
         List<OutputFilePreview> outputs,
         Path outputRoot,

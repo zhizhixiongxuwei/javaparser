@@ -4,6 +4,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Aggregates all planned changes for a single source file.
+ */
 public final class FileChangePlan {
     private final Path sourceFile;
     private final Path relativePath;
@@ -45,10 +48,16 @@ public final class FileChangePlan {
         return classPlans;
     }
 
+    /**
+     * @return true if this file would be modified in any way.
+     */
     public boolean hasChanges() {
         return countPublicAdditions() > 0 || countFieldChanges() > 0 || countMovedClasses() > 0;
     }
 
+    /**
+     * Count classes that will gain a public modifier.
+     */
     public int countPublicAdditions() {
         int count = 0;
         for (ClassChangePlan plan : classPlans) {
@@ -59,6 +68,9 @@ public final class FileChangePlan {
         return count;
     }
 
+    /**
+     * Count fields that will be promoted to public.
+     */
     public int countFieldChanges() {
         int count = 0;
         for (ClassChangePlan plan : classPlans) {
@@ -67,6 +79,9 @@ public final class FileChangePlan {
         return count;
     }
 
+    /**
+     * Count classes that will be written to separate files.
+     */
     public int countMovedClasses() {
         int count = 0;
         for (ClassChangePlan plan : classPlans) {
@@ -77,6 +92,9 @@ public final class FileChangePlan {
         return count;
     }
 
+    /**
+     * Build a compact summary string for list display.
+     */
     public String summary() {
         StringBuilder sb = new StringBuilder(relativePath.toString());
         List<String> parts = new ArrayList<>();
@@ -98,6 +116,9 @@ public final class FileChangePlan {
         return sb.toString();
     }
 
+    /**
+     * Build detailed human-readable lines describing the planned changes.
+     */
     public List<String> detailLines() {
         List<String> lines = new ArrayList<>();
         lines.add("File: " + relativePath);

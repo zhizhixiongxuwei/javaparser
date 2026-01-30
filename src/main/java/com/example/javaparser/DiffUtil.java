@@ -4,10 +4,17 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+/**
+ * Simple diff utility that performs line-level LCS and optional character-level
+ * highlighting for changed lines.
+ */
 public final class DiffUtil {
     private DiffUtil() {
     }
 
+    /**
+     * Compute a list of diff rows to render side-by-side.
+     */
     public static List<DiffRow> diff(String leftText, String rightText) {
         List<String> leftLines = splitLines(leftText);
         List<String> rightLines = splitLines(rightText);
@@ -15,6 +22,7 @@ public final class DiffUtil {
         int leftSize = leftLines.size();
         int rightSize = rightLines.size();
 
+        // Build LCS table for line-level diff.
         int[][] lcs = new int[leftSize + 1][rightSize + 1];
         for (int i = leftSize - 1; i >= 0; i--) {
             for (int j = rightSize - 1; j >= 0; j--) {
@@ -26,6 +34,7 @@ public final class DiffUtil {
             }
         }
 
+        // Walk the LCS table to produce a sequence of edit operations.
         List<DiffOp> ops = new ArrayList<>();
         int i = 0;
         int j = 0;
@@ -51,6 +60,7 @@ public final class DiffUtil {
             ops.add(new DiffOp(DiffOpType.INSERT, rightLines.get(j++)));
         }
 
+        // Convert edit ops into rows, pairing deletions with insertions as changes.
         List<DiffRow> rows = new ArrayList<>();
         LineCounter counter = new LineCounter();
         int index = 0;
@@ -100,6 +110,9 @@ public final class DiffUtil {
         return rows;
     }
 
+    /**
+     * Build a single diff row with line numbers and optionally highlighted segments.
+     */
     private static DiffRow buildRow(
         String left,
         String right,
@@ -123,12 +136,16 @@ public final class DiffUtil {
         return new DiffRow(left, right, leftType, rightType, leftLine, rightLine, segments.left, segments.right);
     }
 
+    /**
+     * Compute character-level differences for a changed line.
+     */
     private static DiffSegments diffChars(String left, String right) {
         char[] leftChars = left.toCharArray();
         char[] rightChars = right.toCharArray();
         int leftSize = leftChars.length;
         int rightSize = rightChars.length;
 
+        // LCS for character-level diff.
         int[][] lcs = new int[leftSize + 1][rightSize + 1];
         for (int i = leftSize - 1; i >= 0; i--) {
             for (int j = rightSize - 1; j >= 0; j--) {
@@ -171,6 +188,9 @@ public final class DiffUtil {
         return new DiffSegments(leftSegments, rightSegments);
     }
 
+    /**
+     * Append a character to the last segment if it shares the highlight style.
+     */
     private static void append(List<DiffSegment> segments, char ch, boolean highlight) {
         if (segments.isEmpty()) {
             segments.add(new DiffSegment(String.valueOf(ch), highlight));
@@ -184,6 +204,9 @@ public final class DiffUtil {
         }
     }
 
+    /**
+     * Split text into lines, keeping trailing empty line if present.
+     */
     private static List<String> splitLines(String text) {
         if (text == null || text.isEmpty()) {
             return List.of();

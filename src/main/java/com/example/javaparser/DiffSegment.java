@@ -1,5 +1,8 @@
 package com.example.javaparser;
 
+/**
+ * A contiguous text segment in a diff row, optionally highlighted.
+ */
 public final class DiffSegment {
     private final String text;
     private final boolean highlight;

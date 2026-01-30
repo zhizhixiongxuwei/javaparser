@@ -53,6 +53,17 @@ import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
 import javafx.scene.layout.GridPane;
 
+/**
+ * JavaFX UI for scanning, previewing, and applying Java modifier changes.
+ * <p>
+ * The UI flow is:
+ * <ol>
+ *   <li>Select input and output directories.</li>
+ *   <li>Scan for planned changes.</li>
+ *   <li>Preview details/diff per file.</li>
+ *   <li>Apply selected or all plans.</li>
+ * </ol>
+ */
 public class JavaModifierGuiApp extends Application {
     private static final int CONFLICT_PREVIEW_LIMIT = 10;
     private static final double DEFAULT_SPLIT_RATIO = 0.5;
@@ -61,16 +72,18 @@ public class JavaModifierGuiApp extends Application {
     private static final String DEFAULT_THEME_NAME = "Light";
     private static final List<ThemeOption> THEMES = List.of(
         new ThemeOption("Light", "/styles/theme-light.css"),
-        new ThemeOption("Dark", "/styles/theme-dark.css"),
-        new ThemeOption("Neon", "/styles/theme-neon.css")
+        new ThemeOption("High Contrast", "/styles/theme-contrast.css"),
+        new ThemeOption("Warm", "/styles/theme-warm.css")
     );
 
+    // Core services and persisted UI preferences.
     private final JavaModifierProcessor processor = new JavaModifierProcessor();
     private final ObservableList<FileChangePlan> plans = FXCollections.observableArrayList();
     private final GuiPreferences preferences = new GuiPreferences();
     private final DoubleProperty diffSplitRatio = new SimpleDoubleProperty(DEFAULT_SPLIT_RATIO);
     private String appStylesheet;
 
+    // Primary UI widgets (held as fields so background tasks can update them).
     private final ListView<FileChangePlan> fileList = new ListView<>(plans);
     private final ListView<DiffRow> diffList = new ListView<>();
     private final ListView<String> detailsList = new ListView<>();
@@ -81,12 +94,19 @@ public class JavaModifierGuiApp extends Application {
     private Path outputDir;
     private String currentOriginal;
 
+    /**
+     * Standard JavaFX entry point.
+     */
     public static void main(String[] args) {
         launch(args);
     }
 
     @Override
+    /**
+     * Build and wire the UI, then show the primary stage.
+     */
     public void start(Stage stage) {
+        // Load MaterialFX base theme before applying our custom theme stylesheets.
         applyMaterialFxTheme();
         boolean initialVerbose = getParameters().getRaw().contains("--verbose");
         LogLevelController.setVerbose(initialVerbose);
@@ -118,6 +138,7 @@ public class JavaModifierGuiApp extends Application {
         splitSlider.setPrefWidth(160);
         splitSlider.setBlockIncrement(0.05);
         splitSlider.valueProperty().bindBidirectional(diffSplitRatio);
+        // Persist slider changes immediately and also on drag finish.
         diffSplitRatio.addListener((obs, oldValue, newValue) -> {
             if (!splitSlider.isValueChanging()) {
                 preferences.saveDiffSplitRatio(newValue.doubleValue());
@@ -271,6 +292,7 @@ public class JavaModifierGuiApp extends Application {
 
         Scene scene = new Scene(root, 1000, 640);
         applyTheme(scene, initialTheme);
+        // Apply and persist theme changes.
         themeSelector.valueProperty().addListener((obs, oldValue, newValue) -> {
             ThemeOption resolved = newValue == null ? resolveTheme(DEFAULT_THEME_NAME) : newValue;
             applyTheme(scene, resolved);
@@ -281,6 +303,9 @@ public class JavaModifierGuiApp extends Application {
         stage.show();
     }
 
+    /**
+     * Show a directory chooser and return the selected path or null.
+     */
     private Path chooseDirectory(Stage stage, String title) {
         DirectoryChooser chooser = new DirectoryChooser();
         chooser.setTitle(title);
@@ -288,6 +313,9 @@ public class JavaModifierGuiApp extends Application {
         return selected == null ? null : selected.toPath();
     }
 
+    /**
+     * Kick off background scan and refresh the plans list on success.
+     */
     private void runScan(Button scanButton, Button applyAllButton, boolean autoSelectFirst) {
         if (inputDir == null || outputDir == null) {
             statusLabel.setText("Select both input and output directories");
@@ -326,11 +354,15 @@ public class JavaModifierGuiApp extends Application {
             applyAllButton.setDisable(plans.isEmpty());
         });
 
+        // Run in a background thread to avoid blocking the JavaFX UI thread.
         Thread thread = new Thread(task, "scan-task");
         thread.setDaemon(true);
         thread.start();
     }
 
+    /**
+     * Apply changes for the currently selected file.
+     */
     private void applySelected() {
         FileChangePlan selected = fileList.getSelectionModel().getSelectedItem();
         if (selected == null) {
@@ -381,6 +413,9 @@ public class JavaModifierGuiApp extends Application {
         thread.start();
     }
 
+    /**
+     * Apply changes for all scanned files, with progress updates in the status bar.
+     */
     private void applyAll(Button scanButton, Button applySelectedButton, Button applyAllButton) {
         if (plans.isEmpty()) {
             return;
@@ -453,6 +488,9 @@ public class JavaModifierGuiApp extends Application {
         thread.start();
     }
 
+    /**
+     * Install MaterialFX base theme and assets as a global stylesheet.
+     */
     private static void applyMaterialFxTheme() {
         UserAgentBuilder.builder()
             .themes(JavaFXThemes.MODENA)
@@ -463,6 +501,9 @@ public class JavaModifierGuiApp extends Application {
             .setGlobal();
     }
 
+    /**
+     * Match a persisted theme name to a theme option (defaults to first).
+     */
     private ThemeOption resolveTheme(String name) {
         if (name == null) {
             return THEMES.get(0);
@@ -475,6 +516,9 @@ public class JavaModifierGuiApp extends Application {
         return THEMES.get(0);
     }
 
+    /**
+     * Remove the previous stylesheet and apply the newly selected theme.
+     */
     private void applyTheme(Scene scene, ThemeOption theme) {
         if (scene == null || theme == null) {
             return;
@@ -488,10 +532,16 @@ public class JavaModifierGuiApp extends Application {
         }
     }
 
+    /**
+     * Resolve a classpath stylesheet to a URL for JavaFX.
+     */
     private String resolveStylesheet(String resourcePath) {
         return Objects.requireNonNull(getClass().getResource(resourcePath)).toExternalForm();
     }
 
+    /**
+     * Reuse the current app theme for dialogs.
+     */
     private void applyDialogStyle(Alert alert) {
         if (appStylesheet != null) {
             alert.getDialogPane().getStylesheets().add(appStylesheet);
@@ -499,6 +549,9 @@ public class JavaModifierGuiApp extends Application {
         alert.getDialogPane().getStyleClass().add("cool-dialog");
     }
 
+    /**
+     * Show a themed info dialog with the supplied text.
+     */
     private void showInfoDialog(String title, String message) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
         alert.setTitle(title);
@@ -508,6 +561,9 @@ public class JavaModifierGuiApp extends Application {
         alert.showAndWait();
     }
 
+    /**
+     * Bind column widths in the diff header to the split ratio.
+     */
     private static void bindSplitColumns(
         ColumnConstraints leftCol,
         ColumnConstraints rightCol,
@@ -517,16 +573,25 @@ public class JavaModifierGuiApp extends Application {
         ratio.addListener((obs, oldValue, newValue) -> setSplitColumns(leftCol, rightCol, newValue.doubleValue()));
     }
 
+    /**
+     * Apply a percentage split to the diff header columns.
+     */
     private static void setSplitColumns(ColumnConstraints leftCol, ColumnConstraints rightCol, double ratio) {
         double leftPercent = ratio * 100.0;
         leftCol.setPercentWidth(leftPercent);
         rightCol.setPercentWidth(100.0 - leftPercent);
     }
 
+    /**
+     * Clamp a value between a minimum and maximum.
+     */
     private static double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
     }
 
+    /**
+     * Small DTO for a displayable theme option.
+     */
     private record ThemeOption(String name, String resourcePath) {
         @Override
         public String toString() {
@@ -534,6 +599,9 @@ public class JavaModifierGuiApp extends Application {
         }
     }
 
+    /**
+     * Ask the user how to handle output conflicts (overwrite/skip/cancel).
+     */
     private OutputConflictStrategy resolveConflictStrategy(List<Path> conflicts, String actionLabel) {
         if (conflicts.isEmpty()) {
             return OutputConflictStrategy.OVERWRITE;
@@ -564,6 +632,9 @@ public class JavaModifierGuiApp extends Application {
         return result.get() == overwrite ? OutputConflictStrategy.OVERWRITE : OutputConflictStrategy.SKIP_EXISTING;
     }
 
+    /**
+     * Format a preview list of conflicting relative paths for the dialog.
+     */
     private String formatConflictDetails(List<Path> conflicts) {
         String preview = conflicts.stream()
             .limit(CONFLICT_PREVIEW_LIMIT)
@@ -575,6 +646,9 @@ public class JavaModifierGuiApp extends Application {
         return preview + System.lineSeparator() + "... and " + (conflicts.size() - CONFLICT_PREVIEW_LIMIT) + " more";
     }
 
+    /**
+     * Compute output conflicts for a set of plans based on the current output directory.
+     */
     private List<Path> collectConflicts(List<FileChangePlan> plans) {
         if (outputDir == null) {
             return List.of();
@@ -591,6 +665,9 @@ public class JavaModifierGuiApp extends Application {
         return new ArrayList<>(conflicts);
     }
 
+    /**
+     * Compute all output relative paths for a plan (including split outputs).
+     */
     private List<Path> computeOutputRelativePaths(FileChangePlan plan) {
         List<Path> outputs = new ArrayList<>();
         Path relative = plan.getRelativePath();
@@ -614,11 +691,17 @@ public class JavaModifierGuiApp extends Application {
         return outputs;
     }
 
+    /**
+     * Build an output path for a class split into its own file.
+     */
     private Path classOutputPath(Path parent, String className) {
         Path fileName = Path.of(className + ".java");
         return parent == null ? fileName : parent.resolve(fileName);
     }
 
+    /**
+     * Load the preview diff for a file on a background thread.
+     */
     private void loadPreview(FileChangePlan plan) {
         outputSelector.getItems().clear();
         outputSelector.setDisable(true);
@@ -664,6 +747,9 @@ public class JavaModifierGuiApp extends Application {
         thread.start();
     }
 
+    /**
+     * Reset preview state and clear diff/output selectors.
+     */
     private void clearPreview() {
         outputSelector.getItems().clear();
         outputSelector.setDisable(true);
@@ -671,8 +757,14 @@ public class JavaModifierGuiApp extends Application {
         diffList.getItems().clear();
     }
 
+    /**
+     * Background task payload for preview generation.
+     */
     private record PreviewData(String originalContent, List<OutputFilePreview> outputs) {}
 
+    /**
+     * Custom cell to render diff rows with line numbers and character-level highlights.
+     */
     private static final class DiffRowCell extends ListCell<DiffRow> {
         private final Label leftLine = new Label();
         private final Label rightLine = new Label();
@@ -728,6 +820,9 @@ public class JavaModifierGuiApp extends Application {
             setGraphic(grid);
         }
 
+        /**
+         * Build a list of styled Text nodes for a diff line.
+         */
         private List<Text> buildText(List<DiffSegment> segments, boolean isLeft) {
             List<Text> nodes = new java.util.ArrayList<>();
             for (DiffSegment segment : segments) {
@@ -738,6 +833,9 @@ public class JavaModifierGuiApp extends Application {
             return nodes;
         }
 
+        /**
+         * Decide per-segment style for changed vs unchanged content.
+         */
         private String textStyle(boolean highlight, boolean isLeft) {
             if (!highlight) {
                 return "-fx-fill: #111111;";
@@ -745,6 +843,9 @@ public class JavaModifierGuiApp extends Application {
             return isLeft ? "-fx-fill: #b71c1c; -fx-font-weight: bold;" : "-fx-fill: #1b5e20; -fx-font-weight: bold;";
         }
 
+        /**
+         * Pick a background color for each row type.
+         */
         private String rowStyle(DiffType type) {
             String base = "-fx-padding: 2 6 2 6;";
             return switch (type) {

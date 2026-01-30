@@ -1,5 +1,8 @@
 package com.example.javaparser;
 
+/**
+ * One row in a side-by-side diff view.
+ */
 public final class DiffRow {
     private final String left;
     private final String right;

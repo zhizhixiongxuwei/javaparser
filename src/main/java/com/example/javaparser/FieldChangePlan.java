@@ -2,6 +2,9 @@ package com.example.javaparser;
 
 import java.util.List;
 
+/**
+ * Represents a group of field modifier changes within a class.
+ */
 public final class FieldChangePlan {
     private final String fromModifier;
     private final List<String> fieldNames;
@@ -19,6 +22,9 @@ public final class FieldChangePlan {
         return fieldNames;
     }
 
+    /**
+     * Build a human-readable description for UI display.
+     */
     public String describe() {
         return fromModifier + " -> public: " + String.join(", ", fieldNames);
     }

@@ -1,0 +1,91 @@
+.root {
+    -fx-font-family: "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
+    -fx-base: #f9f3e8;
+    -fx-background: #fff7e8;
+    -fx-background-color: linear-gradient(to bottom right, #fff8ec, #f7ead1);
+    -fx-control-inner-background: #fffaf2;
+    -fx-accent: #e0a100;
+    -fx-focus-color: #e0a100;
+    -fx-faint-focus-color: rgba(224, 161, 0, 0.25);
+    -fx-text-fill: #3a2f26;
+}
+
+.label {
+    -fx-text-fill: #3a2f26;
+}
+
+.button {
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-padding: 6 14;
+    -fx-background-color: linear-gradient(to bottom, #fff6e3, #f4e2c3);
+    -fx-border-color: #e2c9a5;
+    -fx-text-fill: #3a2f26;
+}
+
+.button:hover {
+    -fx-border-color: #e0a100;
+    -fx-background-color: linear-gradient(to bottom, #fff1d6, #f0ddb9);
+    -fx-effect: dropshadow(gaussian, rgba(224, 161, 0, 0.3), 10, 0.25, 0, 0);
+}
+
+.text-field,
+.text-area,
+.combo-box,
+.list-view,
+.tab-pane,
+.split-pane,
+.scroll-pane {
+    -fx-background-color: #fffaf2;
+    -fx-border-color: #e2c9a5;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+}
+
+.list-cell {
+    -fx-text-fill: #3a2f26;
+    -fx-background-color: transparent;
+}
+
+.list-cell:filled:selected,
+.list-cell:filled:selected:focused {
+    -fx-background-color: #fdecc8;
+    -fx-text-fill: #2b231c;
+}
+
+.tab-pane .tab-header-area {
+    -fx-background-color: #f6e8cf;
+}
+
+.tab-pane .tab:selected {
+    -fx-background-color: #fff6e3;
+    -fx-border-color: #e0a100;
+    -fx-border-width: 0 0 2 0;
+}
+
+.check-box .box {
+    -fx-background-color: #fffaf2;
+    -fx-border-color: #e2c9a5;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+}
+
+.check-box:selected .mark {
+    -fx-background-color: #e0a100;
+}
+
+.slider .track {
+    -fx-background-color: #e2c9a5;
+}
+
+.slider .thumb {
+    -fx-background-color: #e0a100;
+    -fx-effect: dropshadow(gaussian, rgba(224, 161, 0, 0.4), 10, 0.35, 0, 0);
+}
+
+.cool-dialog {
+    -fx-background-color: linear-gradient(to bottom right, #fff6e3, #f4e2c3);
+    -fx-border-color: #e2c9a5;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+}

@@ -2,6 +2,9 @@ package com.example.javaparser;
 
 import java.util.List;
 
+/**
+ * Planned changes for a single top-level class.
+ */
 public final class ClassChangePlan {
     private final String className;
     private final boolean moveToNewFile;
@@ -31,6 +34,9 @@ public final class ClassChangePlan {
         return fieldChanges;
     }
 
+    /**
+     * @return true if this class will be moved, have public added, or fields updated.
+     */
     public boolean hasChanges() {
         return moveToNewFile || addPublic || !fieldChanges.isEmpty();
     }

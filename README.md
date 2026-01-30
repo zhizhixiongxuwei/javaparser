@@ -23,7 +23,7 @@ The GUI only scans and lists changes until you click "Apply Selected" or "Apply 
 line-numbered, character-highlighted original vs modified preview in the Diff tab.
 Use the "Diff split" slider in the bottom toolbar to adjust left/right preview widths; the setting
 is saved to `~/.javaparser-modifier/gui.properties`.
-Use the "Theme" selector to switch between Light, Dark, and Neon styles (also persisted).
+Use the "Theme" selector to switch between Light, High Contrast, and Warm styles (also persisted).
 
 ## Behavior
 

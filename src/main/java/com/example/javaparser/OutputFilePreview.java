@@ -2,6 +2,9 @@ package com.example.javaparser;
 
 import java.nio.file.Path;
 
+/**
+ * Represents a generated output file and its content for preview or write.
+ */
 public final class OutputFilePreview {
     private final Path relativePath;
     private final String content;
