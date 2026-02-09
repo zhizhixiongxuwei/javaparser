@@ -89,3 +89,44 @@
     -fx-border-radius: 10;
     -fx-background-radius: 10;
 }
+
+/* Diff row background styles */
+.diff-row-added {
+    -fx-padding: 2 6 2 6;
+    -fx-background-color: #e8f5d6;
+}
+
+.diff-row-removed {
+    -fx-padding: 2 6 2 6;
+    -fx-background-color: #f5ddd6;
+}
+
+.diff-row-changed {
+    -fx-padding: 2 6 2 6;
+    -fx-background-color: #fef3d0;
+}
+
+.diff-row-empty {
+    -fx-padding: 2 6 2 6;
+    -fx-background-color: #f2ece0;
+}
+
+.diff-row-same {
+    -fx-padding: 2 6 2 6;
+    -fx-background-color: transparent;
+}
+
+/* Diff character-level highlight styles */
+.diff-highlight-left {
+    -fx-fill: #a0522d;
+    -fx-font-weight: bold;
+}
+
+.diff-highlight-right {
+    -fx-fill: #3d7a2a;
+    -fx-font-weight: bold;
+}
+
+.diff-text-normal {
+    -fx-fill: #3a2f26;
+}

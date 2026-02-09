@@ -157,51 +157,35 @@ public final class DiffUtil {
             }
         }
 
-        List<DiffSegment> leftSegments = new ArrayList<>();
-        List<DiffSegment> rightSegments = new ArrayList<>();
+        SegmentBuilder leftBuilder = new SegmentBuilder();
+        SegmentBuilder rightBuilder = new SegmentBuilder();
 
         int i = 0;
         int j = 0;
         while (i < leftSize && j < rightSize) {
             if (leftChars[i] == rightChars[j]) {
-                append(leftSegments, leftChars[i], false);
-                append(rightSegments, rightChars[j], false);
+                leftBuilder.append(leftChars[i], false);
+                rightBuilder.append(rightChars[j], false);
                 i++;
                 j++;
             } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-                append(leftSegments, leftChars[i], true);
+                leftBuilder.append(leftChars[i], true);
                 i++;
             } else {
-                append(rightSegments, rightChars[j], true);
+                rightBuilder.append(rightChars[j], true);
                 j++;
             }
         }
         while (i < leftSize) {
-            append(leftSegments, leftChars[i], true);
+            leftBuilder.append(leftChars[i], true);
             i++;
         }
         while (j < rightSize) {
-            append(rightSegments, rightChars[j], true);
+            rightBuilder.append(rightChars[j], true);
             j++;
         }
 
-        return new DiffSegments(leftSegments, rightSegments);
-    }
-
-    /**
-     * Append a character to the last segment if it shares the highlight style.
-     */
-    private static void append(List<DiffSegment> segments, char ch, boolean highlight) {
-        if (segments.isEmpty()) {
-            segments.add(new DiffSegment(String.valueOf(ch), highlight));
-            return;
-        }
-        DiffSegment last = segments.get(segments.size() - 1);
-        if (last.isHighlight() == highlight) {
-            segments.set(segments.size() - 1, new DiffSegment(last.getText() + ch, highlight));
-        } else {
-            segments.add(new DiffSegment(String.valueOf(ch), highlight));
-        }
+        return new DiffSegments(leftBuilder.build(), rightBuilder.build());
     }
 
     /**
@@ -251,6 +235,38 @@ public final class DiffUtil {
         private DiffOp(DiffOpType type, String value) {
             this.type = type;
             this.value = value;
+        }
+    }
+
+    /**
+     * Accumulates characters into segments efficiently using StringBuilder,
+     * avoiding O(n^2) string concatenation.
+     */
+    private static final class SegmentBuilder {
+        private final List<DiffSegment> segments = new ArrayList<>();
+        private final StringBuilder buffer = new StringBuilder();
+        private boolean currentHighlight;
+        private boolean hasContent;
+
+        private void append(char ch, boolean highlight) {
+            if (hasContent && highlight != currentHighlight) {
+                flush();
+            }
+            buffer.append(ch);
+            currentHighlight = highlight;
+            hasContent = true;
+        }
+
+        private void flush() {
+            if (buffer.length() > 0) {
+                segments.add(new DiffSegment(buffer.toString(), currentHighlight));
+                buffer.setLength(0);
+            }
+        }
+
+        private List<DiffSegment> build() {
+            flush();
+            return segments;
         }
     }
 }

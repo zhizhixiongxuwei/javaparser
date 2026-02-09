@@ -4,6 +4,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -21,6 +22,7 @@ import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -76,6 +78,10 @@ public class JavaModifierGuiApp extends Application {
         new ThemeOption("Warm", "/styles/theme-warm.css")
     );
 
+    private static final List<String> DIFF_ROW_STYLE_CLASSES = List.of(
+        "diff-row-added", "diff-row-removed", "diff-row-changed", "diff-row-empty", "diff-row-same"
+    );
+
     // Core services and persisted UI preferences.
     private final JavaModifierProcessor processor = new JavaModifierProcessor();
     private final ObservableList<FileChangePlan> plans = FXCollections.observableArrayList();
@@ -83,8 +89,13 @@ public class JavaModifierGuiApp extends Application {
     private final DoubleProperty diffSplitRatio = new SimpleDoubleProperty(DEFAULT_SPLIT_RATIO);
     private String appStylesheet;
 
+    // File list search/filter and checkbox multi-select.
+    private final Set<FileChangePlan> checkedPlans = new HashSet<>();
+    private final FilteredList<FileChangePlan> filteredPlans = new FilteredList<>(plans, p -> true);
+    private TextField filterField;
+
     // Primary UI widgets (held as fields so background tasks can update them).
-    private final ListView<FileChangePlan> fileList = new ListView<>(plans);
+    private final ListView<FileChangePlan> fileList = new ListView<>(filteredPlans);
     private final ListView<DiffRow> diffList = new ListView<>();
     private final ListView<String> detailsList = new ListView<>();
     private final ComboBox<OutputFilePreview> outputSelector = new ComboBox<>();
@@ -115,6 +126,10 @@ public class JavaModifierGuiApp extends Application {
         diffSplitRatio.set(initialRatio);
         ThemeOption initialTheme = resolveTheme(preferences.loadTheme(DEFAULT_THEME_NAME));
 
+        // Restore persisted directories.
+        Path savedInputDir = preferences.loadInputDir();
+        Path savedOutputDir = preferences.loadOutputDir();
+
         TextField inputField = new TextField();
         inputField.setEditable(false);
         Button inputButton = new Button("Choose Input");
@@ -122,6 +137,15 @@ public class JavaModifierGuiApp extends Application {
         TextField outputField = new TextField();
         outputField.setEditable(false);
         Button outputButton = new Button("Choose Output");
+
+        if (savedInputDir != null) {
+            inputDir = savedInputDir;
+            inputField.setText(savedInputDir.toString());
+        }
+        if (savedOutputDir != null) {
+            outputDir = savedOutputDir;
+            outputField.setText(savedOutputDir.toString());
+        }
 
         Button scanButton = new Button("Scan");
         Button applyButton = new Button("Apply Selected");
@@ -154,19 +178,33 @@ public class JavaModifierGuiApp extends Application {
         themeSelector.setPrefWidth(130);
         themeSelector.getSelectionModel().select(initialTheme);
 
+        // Rule toggle checkboxes.
+        CheckBox classToPublicCb = new CheckBox("Class -> public");
+        classToPublicCb.setSelected(true);
+        CheckBox fieldToPublicCb = new CheckBox("Field -> public");
+        fieldToPublicCb.setSelected(true);
+        CheckBox splitFilesCb = new CheckBox("Split files");
+        splitFilesCb.setSelected(true);
+
+        classToPublicCb.selectedProperty().addListener((obs, oldVal, newVal) -> updateProcessorConfig(classToPublicCb, fieldToPublicCb, splitFilesCb));
+        fieldToPublicCb.selectedProperty().addListener((obs, oldVal, newVal) -> updateProcessorConfig(classToPublicCb, fieldToPublicCb, splitFilesCb));
+        splitFilesCb.selectedProperty().addListener((obs, oldVal, newVal) -> updateProcessorConfig(classToPublicCb, fieldToPublicCb, splitFilesCb));
+
         inputButton.setOnAction(event -> {
-            Path selected = chooseDirectory(stage, "Select input directory");
+            Path selected = chooseDirectory(stage, "Select input directory", inputDir);
             if (selected != null) {
                 inputDir = selected;
                 inputField.setText(selected.toString());
+                preferences.saveInputDir(selected);
             }
         });
 
         outputButton.setOnAction(event -> {
-            Path selected = chooseDirectory(stage, "Select output directory");
+            Path selected = chooseDirectory(stage, "Select output directory", outputDir);
             if (selected != null) {
                 outputDir = selected;
                 outputField.setText(selected.toString());
+                preferences.saveOutputDir(selected);
             }
         });
 
@@ -174,20 +212,57 @@ public class JavaModifierGuiApp extends Application {
         applyButton.setOnAction(event -> applySelected());
         applyAllButton.setOnAction(event -> applyAll(scanButton, applyButton, applyAllButton));
 
+        // Search/filter field.
+        filterField = new TextField();
+        filterField.setPromptText("Search files...");
+        filterField.textProperty().addListener((obs, oldVal, newVal) -> {
+            String filter = newVal == null ? "" : newVal.trim().toLowerCase();
+            filteredPlans.setPredicate(plan ->
+                filter.isEmpty() || plan.getRelativePath().toString().toLowerCase().contains(filter)
+            );
+        });
+
+        // Select All checkbox for multi-select.
+        CheckBox selectAllCb = new CheckBox("Select All");
+        selectAllCb.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal) {
+                checkedPlans.addAll(filteredPlans);
+            } else {
+                checkedPlans.clear();
+            }
+            fileList.refresh();
+        });
+
         fileList.setCellFactory(list -> new ListCell<>() {
+            private final CheckBox checkBox = new CheckBox();
+            {
+                checkBox.setOnAction(event -> {
+                    FileChangePlan item = getItem();
+                    if (item == null) return;
+                    if (checkBox.isSelected()) {
+                        checkedPlans.add(item);
+                    } else {
+                        checkedPlans.remove(item);
+                    }
+                });
+            }
+
             @Override
             protected void updateItem(FileChangePlan item, boolean empty) {
                 super.updateItem(item, empty);
                 if (empty || item == null) {
                     setText(null);
+                    setGraphic(null);
                 } else {
                     setText(item.summary());
+                    checkBox.setSelected(checkedPlans.contains(item));
+                    setGraphic(checkBox);
                 }
             }
         });
 
         fileList.getSelectionModel().selectedItemProperty().addListener((obs, oldPlan, newPlan) -> {
-            applyButton.setDisable(newPlan == null);
+            applyButton.setDisable(newPlan == null && checkedPlans.isEmpty());
             if (newPlan == null) {
                 detailsList.getItems().clear();
                 clearPreview();
@@ -242,9 +317,19 @@ public class JavaModifierGuiApp extends Application {
         HBox.setHgrow(inputField, Priority.ALWAYS);
         HBox outputRow = new HBox(8, new Label("Output"), outputField, outputButton, scanButton);
         HBox.setHgrow(outputField, Priority.ALWAYS);
+        HBox rulesRow = new HBox(12, new Label("Rules"), classToPublicCb, fieldToPublicCb, splitFilesCb);
+        rulesRow.setAlignment(Pos.CENTER_LEFT);
 
-        VBox topBox = new VBox(8, inputRow, outputRow);
+        VBox topBox = new VBox(8, inputRow, outputRow, rulesRow);
         topBox.setPadding(new Insets(10));
+
+        HBox fileFilterRow = new HBox(8, filterField, selectAllCb);
+        HBox.setHgrow(filterField, Priority.ALWAYS);
+        fileFilterRow.setAlignment(Pos.CENTER_LEFT);
+
+        VBox fileListBox = new VBox(6, fileFilterRow, fileList);
+        VBox.setVgrow(fileList, Priority.ALWAYS);
+        fileListBox.setPadding(new Insets(4));
 
         HBox outputFileRow = new HBox(8, new Label("Output file"), outputSelector);
         HBox.setHgrow(outputSelector, Priority.ALWAYS);
@@ -275,7 +360,7 @@ public class JavaModifierGuiApp extends Application {
         TabPane tabPane = new TabPane(detailsTab, diffTab);
 
         SplitPane splitPane = new SplitPane();
-        splitPane.getItems().addAll(fileList, tabPane);
+        splitPane.getItems().addAll(fileListBox, tabPane);
         splitPane.setDividerPositions(0.35);
 
         HBox splitControl = new HBox(6, new Label("Diff split"), splitSlider);
@@ -304,11 +389,25 @@ public class JavaModifierGuiApp extends Application {
     }
 
     /**
+     * Update the processor config from the rule checkboxes and invalidate the parser cache.
+     */
+    private void updateProcessorConfig(CheckBox classToPublicCb, CheckBox fieldToPublicCb, CheckBox splitFilesCb) {
+        ProcessorConfig config = processor.getConfig();
+        config.setClassToPublic(classToPublicCb.isSelected());
+        config.setFieldToPublic(fieldToPublicCb.isSelected());
+        config.setSplitFiles(splitFilesCb.isSelected());
+        processor.invalidateCache();
+    }
+
+    /**
      * Show a directory chooser and return the selected path or null.
      */
-    private Path chooseDirectory(Stage stage, String title) {
+    private Path chooseDirectory(Stage stage, String title, Path initialDir) {
         DirectoryChooser chooser = new DirectoryChooser();
         chooser.setTitle(title);
+        if (initialDir != null && Files.isDirectory(initialDir)) {
+            chooser.setInitialDirectory(initialDir.toFile());
+        }
         File selected = chooser.showDialog(stage);
         return selected == null ? null : selected.toPath();
     }
@@ -335,6 +434,7 @@ public class JavaModifierGuiApp extends Application {
 
         task.setOnSucceeded(event -> {
             plans.setAll(task.getValue());
+            checkedPlans.clear();
             fileList.getSelectionModel().clearSelection();
             detailsList.getItems().clear();
             clearPreview();
@@ -361,19 +461,26 @@ public class JavaModifierGuiApp extends Application {
     }
 
     /**
-     * Apply changes for the currently selected file.
+     * Apply changes for the currently selected or checked files.
      */
     private void applySelected() {
-        FileChangePlan selected = fileList.getSelectionModel().getSelectedItem();
-        if (selected == null) {
-            return;
+        List<FileChangePlan> targets;
+        if (!checkedPlans.isEmpty()) {
+            targets = List.copyOf(checkedPlans);
+        } else {
+            FileChangePlan selected = fileList.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                return;
+            }
+            targets = List.of(selected);
         }
+
         if (inputDir == null || outputDir == null) {
             statusLabel.setText("Select both input and output directories");
             return;
         }
 
-        List<Path> conflicts = collectConflicts(List.of(selected));
+        List<Path> conflicts = collectConflicts(targets);
         OutputConflictStrategy conflictStrategy = resolveConflictStrategy(conflicts, "Apply Selected");
         if (conflictStrategy == null) {
             statusLabel.setText("Apply canceled");
@@ -381,12 +488,16 @@ public class JavaModifierGuiApp extends Application {
         }
         int conflictCount = conflicts.size();
 
-        statusLabel.setText("Applying " + selected.getRelativePath());
+        statusLabel.setText("Applying " + targets.size() + " file(s)...");
+
+        List<FileChangePlan> snapshot = List.copyOf(targets);
 
         Task<Void> task = new Task<>() {
             @Override
             protected Void call() throws Exception {
-                processor.applySingle(inputDir, outputDir, selected.getSourceFile(), conflictStrategy);
+                for (FileChangePlan plan : snapshot) {
+                    processor.applySingle(inputDir, outputDir, plan.getSourceFile(), conflictStrategy);
+                }
                 return null;
             }
         };
@@ -396,12 +507,10 @@ public class JavaModifierGuiApp extends Application {
             if (conflictStrategy == OutputConflictStrategy.SKIP_EXISTING && conflictCount > 0) {
                 suffix = " (skipped " + conflictCount + " existing file(s))";
             }
-            statusLabel.setText("Applied: " + selected.getRelativePath() + suffix);
-            String message = "Applied: " + selected.getRelativePath();
-            if (conflictStrategy == OutputConflictStrategy.SKIP_EXISTING && conflictCount > 0) {
-                message += "\nSkipped existing files: " + conflictCount;
-            }
-            showInfoDialog("Apply Selected Complete", message);
+            statusLabel.setText("Applied " + snapshot.size() + " file(s)" + suffix);
+            showInfoDialog("Apply Selected Complete", "Applied files: " + snapshot.size()
+                + (conflictStrategy == OutputConflictStrategy.SKIP_EXISTING && conflictCount > 0
+                    ? "\nSkipped existing files: " + conflictCount : ""));
         });
         task.setOnFailed(event -> {
             Throwable ex = task.getException();
@@ -763,6 +872,27 @@ public class JavaModifierGuiApp extends Application {
     private record PreviewData(String originalContent, List<OutputFilePreview> outputs) {}
 
     /**
+     * Map a DiffType to the corresponding CSS style class name.
+     */
+    private static String diffRowStyleClass(DiffType type) {
+        return switch (type) {
+            case ADDED -> "diff-row-added";
+            case REMOVED -> "diff-row-removed";
+            case CHANGED -> "diff-row-changed";
+            case EMPTY -> "diff-row-empty";
+            case SAME -> "diff-row-same";
+        };
+    }
+
+    /**
+     * Replace any diff-row-* style class on the node with the new one.
+     */
+    private static void applyRowStyleClass(HBox box, DiffType type) {
+        box.getStyleClass().removeAll(DIFF_ROW_STYLE_CLASSES);
+        box.getStyleClass().add(diffRowStyleClass(type));
+    }
+
+    /**
      * Custom cell to render diff rows with line numbers and character-level highlights.
      */
     private static final class DiffRowCell extends ListCell<DiffRow> {
@@ -784,10 +914,12 @@ public class JavaModifierGuiApp extends Application {
 
             leftLine.setMinWidth(48);
             leftLine.setAlignment(Pos.TOP_RIGHT);
-            leftLine.setStyle("-fx-text-fill: #666666; -fx-font-family: 'Consolas'; -fx-font-size: 11px;");
+            leftLine.getStyleClass().add("diff-line-number");
+            leftLine.setStyle("-fx-font-family: 'Consolas'; -fx-font-size: 11px;");
             rightLine.setMinWidth(48);
             rightLine.setAlignment(Pos.TOP_RIGHT);
-            rightLine.setStyle("-fx-text-fill: #666666; -fx-font-family: 'Consolas'; -fx-font-size: 11px;");
+            rightLine.getStyleClass().add("diff-line-number");
+            rightLine.setStyle("-fx-font-family: 'Consolas'; -fx-font-size: 11px;");
 
             leftFlow.setStyle("-fx-font-family: 'Consolas'; -fx-font-size: 12px;");
             rightFlow.setStyle("-fx-font-family: 'Consolas'; -fx-font-size: 12px;");
@@ -815,46 +947,27 @@ public class JavaModifierGuiApp extends Application {
             rightLine.setText(item.getRightLineNumber() == 0 ? "" : String.valueOf(item.getRightLineNumber()));
             leftFlow.getChildren().setAll(buildText(item.getLeftSegments(), true));
             rightFlow.getChildren().setAll(buildText(item.getRightSegments(), false));
-            leftBox.setStyle(rowStyle(item.getLeftType()));
-            rightBox.setStyle(rowStyle(item.getRightType()));
+            applyRowStyleClass(leftBox, item.getLeftType());
+            applyRowStyleClass(rightBox, item.getRightType());
             setGraphic(grid);
         }
 
         /**
-         * Build a list of styled Text nodes for a diff line.
+         * Build a list of styled Text nodes for a diff line, using CSS classes.
          */
         private List<Text> buildText(List<DiffSegment> segments, boolean isLeft) {
             List<Text> nodes = new java.util.ArrayList<>();
             for (DiffSegment segment : segments) {
                 Text text = new Text(segment.getText());
-                text.setStyle(textStyle(segment.isHighlight(), isLeft));
+                text.getStyleClass().removeAll("diff-highlight-left", "diff-highlight-right", "diff-text-normal");
+                if (segment.isHighlight()) {
+                    text.getStyleClass().add(isLeft ? "diff-highlight-left" : "diff-highlight-right");
+                } else {
+                    text.getStyleClass().add("diff-text-normal");
+                }
                 nodes.add(text);
             }
             return nodes;
-        }
-
-        /**
-         * Decide per-segment style for changed vs unchanged content.
-         */
-        private String textStyle(boolean highlight, boolean isLeft) {
-            if (!highlight) {
-                return "-fx-fill: #111111;";
-            }
-            return isLeft ? "-fx-fill: #b71c1c; -fx-font-weight: bold;" : "-fx-fill: #1b5e20; -fx-font-weight: bold;";
-        }
-
-        /**
-         * Pick a background color for each row type.
-         */
-        private String rowStyle(DiffType type) {
-            String base = "-fx-padding: 2 6 2 6;";
-            return switch (type) {
-                case ADDED -> base + " -fx-background-color: #eaffea;";
-                case REMOVED -> base + " -fx-background-color: #ffecec;";
-                case CHANGED -> base + " -fx-background-color: #fff6d6;";
-                case EMPTY -> base + " -fx-background-color: #f5f5f5;";
-                case SAME -> base + " -fx-background-color: transparent;";
-            };
         }
     }
 }

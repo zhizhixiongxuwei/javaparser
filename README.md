@@ -1,36 +1,110 @@
 # javaparser-modifier
 
-A JavaFX GUI that rewrites Java source files using JavaParser 3.28.0, styled with MaterialFX.
+基于 JavaParser 3.28.0 的 JavaFX GUI 工具，用于批量重写 Java 源文件的访问修饰符并拆分多类文件。UI 使用 MaterialFX 组件库。
 
-## Requirements
+## 环境要求
 
 - JDK 17
 - Maven
 
-## Build
+## 构建
 
+```bash
 mvn -DskipTests package
+```
 
-## Run
+## 运行
 
+```bash
 mvn -DskipTests javafx:run
+```
 
-Tip: pass `--verbose` to enable debug logging, or toggle "Verbose logs" in the UI.
+传入 `--verbose` 可开启调试日志，也可在界面中勾选 "Verbose logs" 切换。
 
-Note: `javafx.platform` is set to `win` in `pom.xml`. Change it for other OSes if needed.
+> `pom.xml` 中 `javafx.platform` 默认为 `win`，其他操作系统需自行修改。
 
-The GUI only scans and lists changes until you click "Apply Selected" or "Apply All". It also shows a
-line-numbered, character-highlighted original vs modified preview in the Diff tab.
-Use the "Diff split" slider in the bottom toolbar to adjust left/right preview widths; the setting
-is saved to `~/.javaparser-modifier/gui.properties`.
-Use the "Theme" selector to switch between Light, High Contrast, and Warm styles (also persisted).
+## 核心功能
 
-## Behavior
+- **类修饰符提升** — 将非 public 的顶层类自动添加 `public` 修饰符。
+- **字段修饰符提升** — 将顶层类中的 `private`/`protected` 字段提升为 `public`。
+- **多类文件拆分** — 若文件包含多个顶层类且无 public 类，则拆分为每个类一个文件；若已有一个 public 类，则将其余类移至各自的新文件。
+- **输出目录保留原始结构** — 输出目录镜像输入目录的包层级。
 
-- Adds `public` to any top-level class that is not public.
-- Changes `private`/`protected` fields in top-level classes to `public`.
-- If a file contains only top-level classes and none are public, the file is split into multiple files,
-  each containing one public class named after the class.
-- If a file has a top-level public class, all other top-level classes are moved to new files in the same
-  package (named after each class).
-- Output is written to the output directory, preserving the input directory structure.
+## GUI 功能
+
+### 基本操作流程
+
+1. 选择输入目录和输出目录。
+2. 点击 **Scan** 扫描变更计划。
+3. 在文件列表中查看各文件的变更摘要。
+4. 在 **Details** 标签页查看变更详情，在 **Diff** 标签页查看逐行对比（支持字符级高亮）。
+5. 点击 **Apply Selected** 或 **Apply All** 写入输出。
+
+### 自定义规则开关
+
+顶部 **Rules** 行提供三个复选框，可独立开关每项规则：
+
+- **Class -> public** — 是否将类提升为 public
+- **Field -> public** — 是否将字段提升为 public
+- **Split files** — 是否执行多类文件拆分
+
+取消勾选某项规则后重新扫描，对应的变更将不再出现在计划中。
+
+### 文件列表搜索与多选
+
+- 文件列表上方的搜索框支持按文件路径实时过滤。
+- 每个文件条目前有复选框，可勾选多个文件。
+- **Select All** 复选框可一键勾选/取消当前可见的全部文件。
+- 点击 **Apply Selected** 时，优先应用所有勾选的文件；若无勾选则应用当前选中的单个文件。
+
+### Diff 预览
+
+- 左右分栏对比原始文件与修改后的文件。
+- 变更行以颜色区分：新增（绿色）、删除（红色）、修改（黄色）。
+- 修改行内的具体字符差异以加粗高亮显示。
+- Diff 颜色完全由 CSS 主题驱动，切换主题后配色跟随变化。
+- 底部 **Diff split** 滑块可调节左右分栏宽度比例。
+
+### 主题
+
+支持三套主题，通过底部 **Theme** 选择器切换：
+
+- **Light** — 浅色蓝白配色
+- **High Contrast** — 高对比度黑白配色（无障碍友好）
+- **Warm** — 暖色米黄配色
+
+主题选择会自动持久化。
+
+### 偏好持久化
+
+以下设置保存在 `~/.javaparser-modifier/gui.properties`，重启后自动恢复：
+
+- Diff 分栏比例
+- 主题选择
+- 上次使用的输入目录
+- 上次使用的输出目录
+
+### 输出冲突处理
+
+当输出文件已存在时，弹窗提供三个选项：
+
+- **Overwrite Existing** — 覆盖已有文件
+- **Skip Existing** — 跳过已有文件
+- **Cancel** — 取消操作
+
+## 近期优化
+
+1. **Parser 实例缓存** — 多次扫描同一目录时复用 JavaParser 实例，避免重复构建类型求解器。规则变更时自动失效缓存。
+2. **Diff 字符级拼接性能修复** — 字符级 LCS 比对改用 `StringBuilder` 累积，消除了原先逐字符 `String` 拼接导致的 O(n^2) 开销。
+3. **统一拆分判断逻辑** — 分析阶段和输出构建阶段共用 `determineSplit()` 方法，消除了重复的 if/else 判断链。
+4. **Diff 颜色 CSS 类驱动** — 行背景色和字符高亮色全部改为 CSS 样式类，不再使用内联 style 字符串，切换主题即可改变 Diff 配色。
+5. **文件列表搜索与复选框多选** — 新增搜索过滤、逐项复选和全选功能，支持批量应用。
+6. **自定义规则开关** — 三项转换规则可独立启用/禁用，处理器根据配置决定是否执行对应转换。
+7. **持久化最近使用目录** — 输入/输出目录保存到配置文件，重启后自动恢复并定位到上次选择的位置。
+
+## 技术栈
+
+- Java 17, Maven
+- JavaParser 3.28.0（AST 解析与符号求解）
+- JavaFX 17.0.10 + MaterialFX 11.17.0（UI）
+- SLF4J + Logback（日志）

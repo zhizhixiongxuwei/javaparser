@@ -98,3 +98,44 @@
     -fx-border-radius: 8;
     -fx-background-radius: 8;
 }
+
+/* Diff row background styles */
+.diff-row-added {
+    -fx-padding: 2 6 2 6;
+    -fx-background-color: #d4ffd4;
+}
+
+.diff-row-removed {
+    -fx-padding: 2 6 2 6;
+    -fx-background-color: #ffd4d4;
+}
+
+.diff-row-changed {
+    -fx-padding: 2 6 2 6;
+    -fx-background-color: #fffacc;
+}
+
+.diff-row-empty {
+    -fx-padding: 2 6 2 6;
+    -fx-background-color: #eeeeee;
+}
+
+.diff-row-same {
+    -fx-padding: 2 6 2 6;
+    -fx-background-color: transparent;
+}
+
+/* Diff character-level highlight styles */
+.diff-highlight-left {
+    -fx-fill: #cc0000;
+    -fx-font-weight: bold;
+}
+
+.diff-highlight-right {
+    -fx-fill: #006600;
+    -fx-font-weight: bold;
+}
+
+.diff-text-normal {
+    -fx-fill: #000000;
+}

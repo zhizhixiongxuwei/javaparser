@@ -38,6 +38,27 @@ import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeS
 public class JavaModifierProcessor {
     private static final Logger log = LoggerFactory.getLogger(JavaModifierProcessor.class);
 
+    private JavaParser cachedParser;
+    private Path cachedInputRoot;
+    private ProcessorConfig config = new ProcessorConfig();
+
+    public ProcessorConfig getConfig() {
+        return config;
+    }
+
+    public void setConfig(ProcessorConfig config) {
+        this.config = config;
+    }
+
+    /**
+     * Invalidate the cached parser so that the next call to buildParser() creates a fresh instance.
+     */
+    public void invalidateCache() {
+        cachedParser = null;
+        cachedInputRoot = null;
+        log.debug("Parser cache invalidated");
+    }
+
     /**
      * Scan the input directory and return change plans for files that require modifications.
      */
@@ -126,8 +147,15 @@ public class JavaModifierProcessor {
 
     /**
      * Build a JavaParser instance with symbol solving configured for the input tree.
+     * Caches the parser so that repeated calls with the same inputRoot reuse it.
      */
     private JavaParser buildParser(Path inputRoot) {
+        if (cachedParser != null && cachedInputRoot != null && cachedInputRoot.equals(inputRoot)) {
+            log.debug("Reusing cached parser for {}", inputRoot);
+            return cachedParser;
+        }
+
+        log.debug("Building new parser for {}", inputRoot);
         CombinedTypeSolver typeSolver = new CombinedTypeSolver();
         typeSolver.add(new ReflectionTypeSolver());
         typeSolver.add(new JavaParserTypeSolver(inputRoot.toFile()));
@@ -136,7 +164,46 @@ public class JavaModifierProcessor {
         configuration.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
         configuration.setSymbolResolver(new JavaSymbolSolver(typeSolver));
 
-        return new JavaParser(configuration);
+        cachedParser = new JavaParser(configuration);
+        cachedInputRoot = inputRoot;
+        return cachedParser;
+    }
+
+    /**
+     * Encapsulates the result of deciding how to split a file.
+     */
+    private record SplitDecision(
+        SplitMode splitMode,
+        ClassOrInterfaceDeclaration primary,
+        List<ClassOrInterfaceDeclaration> topLevelClasses
+    ) {}
+
+    /**
+     * Decide whether and how to split a file based on its top-level class declarations.
+     */
+    private SplitDecision determineSplit(CompilationUnit cu) {
+        List<ClassOrInterfaceDeclaration> topLevelClasses = getTopLevelClasses(cu);
+        boolean onlyClasses = isOnlyTopLevelClasses(cu);
+
+        if (!config.isSplitFiles()) {
+            return new SplitDecision(SplitMode.NONE, null, topLevelClasses);
+        }
+
+        boolean hasPublicClass = topLevelClasses.stream().anyMatch(ClassOrInterfaceDeclaration::isPublic);
+
+        if (!hasPublicClass && onlyClasses && !topLevelClasses.isEmpty()) {
+            return new SplitDecision(SplitMode.SPLIT_ALL, null, topLevelClasses);
+        }
+
+        if (hasPublicClass && topLevelClasses.size() > 1) {
+            ClassOrInterfaceDeclaration primary = topLevelClasses.stream()
+                .filter(ClassOrInterfaceDeclaration::isPublic)
+                .findFirst()
+                .orElse(topLevelClasses.get(0));
+            return new SplitDecision(SplitMode.SPLIT_OTHERS, primary, topLevelClasses);
+        }
+
+        return new SplitDecision(SplitMode.NONE, null, topLevelClasses);
     }
 
     /**
@@ -161,36 +228,21 @@ public class JavaModifierProcessor {
         }
 
         CompilationUnit cu = result.getResult().get();
-        List<ClassOrInterfaceDeclaration> topLevelClasses = getTopLevelClasses(cu);
-        boolean hasPublicClass = topLevelClasses.stream().anyMatch(ClassOrInterfaceDeclaration::isPublic);
-        boolean onlyClasses = isOnlyTopLevelClasses(cu);
-
-        // Decide whether to split the file based on top-level class visibility.
-        SplitMode splitMode = SplitMode.NONE;
-        ClassOrInterfaceDeclaration primary = null;
-        if (!hasPublicClass && onlyClasses && !topLevelClasses.isEmpty()) {
-            splitMode = SplitMode.SPLIT_ALL;
-        } else if (hasPublicClass && topLevelClasses.size() > 1) {
-            splitMode = SplitMode.SPLIT_OTHERS;
-            primary = topLevelClasses.stream()
-                .filter(ClassOrInterfaceDeclaration::isPublic)
-                .findFirst()
-                .orElse(topLevelClasses.get(0));
-        }
+        SplitDecision decision = determineSplit(cu);
 
         // Build a per-class plan for public modifier changes and splitting decisions.
         List<ClassChangePlan> classPlans = new ArrayList<>();
-        for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
-            boolean moveToNewFile = splitMode == SplitMode.SPLIT_ALL
-                || (splitMode == SplitMode.SPLIT_OTHERS && clazz != primary);
-            boolean addPublic = !clazz.isPublic();
+        for (ClassOrInterfaceDeclaration clazz : decision.topLevelClasses()) {
+            boolean moveToNewFile = decision.splitMode() == SplitMode.SPLIT_ALL
+                || (decision.splitMode() == SplitMode.SPLIT_OTHERS && clazz != decision.primary());
+            boolean addPublic = config.isClassToPublic() && !clazz.isPublic();
             List<FieldChangePlan> fieldChanges = collectFieldChanges(clazz);
             classPlans.add(new ClassChangePlan(clazz.getNameAsString(), moveToNewFile, addPublic, fieldChanges));
         }
 
         Path relative = inputRoot.relativize(sourceFile);
-        String primaryName = primary == null ? null : primary.getNameAsString();
-        return new FileChangePlan(sourceFile, relative, splitMode, primaryName, classPlans);
+        String primaryName = decision.primary() == null ? null : decision.primary().getNameAsString();
+        return new FileChangePlan(sourceFile, relative, decision.splitMode(), primaryName, classPlans);
     }
 
     /**
@@ -246,6 +298,9 @@ public class JavaModifierProcessor {
      * Ensure the class declaration is public.
      */
     private void ensurePublic(ClassOrInterfaceDeclaration clazz) {
+        if (!config.isClassToPublic()) {
+            return;
+        }
         if (!clazz.isPublic()) {
             clazz.addModifier(Modifier.Keyword.PUBLIC);
         }
@@ -255,6 +310,9 @@ public class JavaModifierProcessor {
      * Promote private/protected fields in a class to public.
      */
     private void updateFieldModifiers(ClassOrInterfaceDeclaration clazz) {
+        if (!config.isFieldToPublic()) {
+            return;
+        }
         for (FieldDeclaration field : clazz.getFields()) {
             if (field.isPrivate() || field.isProtected()) {
                 field.removeModifier(Modifier.Keyword.PRIVATE);
@@ -268,6 +326,9 @@ public class JavaModifierProcessor {
      * Collect a summary of field modifier changes for reporting.
      */
     private List<FieldChangePlan> collectFieldChanges(ClassOrInterfaceDeclaration clazz) {
+        if (!config.isFieldToPublic()) {
+            return List.of();
+        }
         List<FieldChangePlan> changes = new ArrayList<>();
         for (FieldDeclaration field : clazz.getFields()) {
             if (field.isPrivate() || field.isProtected()) {
@@ -303,12 +364,10 @@ public class JavaModifierProcessor {
         }
 
         CompilationUnit cu = result.getResult().get();
-        List<ClassOrInterfaceDeclaration> topLevelClasses = getTopLevelClasses(cu);
-        boolean hasPublicClass = topLevelClasses.stream().anyMatch(ClassOrInterfaceDeclaration::isPublic);
-        boolean onlyClasses = isOnlyTopLevelClasses(cu);
+        SplitDecision decision = determineSplit(cu);
 
         // Apply field modifier changes in-place before any splitting logic.
-        for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
+        for (ClassOrInterfaceDeclaration clazz : decision.topLevelClasses()) {
             updateFieldModifiers(clazz);
         }
 
@@ -316,54 +375,49 @@ public class JavaModifierProcessor {
         Path relativeParent = relative.getParent();
         List<OutputFilePreview> outputs = new ArrayList<>();
 
-        // Case 1: no public class, only classes -> split all classes into separate files.
-        if (!hasPublicClass && onlyClasses && !topLevelClasses.isEmpty()) {
-            for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
-                ensurePublic(clazz);
+        switch (decision.splitMode()) {
+            case SPLIT_ALL -> {
+                for (ClassOrInterfaceDeclaration clazz : decision.topLevelClasses()) {
+                    ensurePublic(clazz);
+                }
+                for (ClassOrInterfaceDeclaration clazz : decision.topLevelClasses()) {
+                    CompilationUnit newCu = buildSplitUnit(cu, clazz);
+                    Path outputRelative = relativeParent == null
+                        ? Path.of(clazz.getNameAsString() + ".java")
+                        : relativeParent.resolve(clazz.getNameAsString() + ".java");
+                    outputs.add(new OutputFilePreview(outputRelative, newCu.toString()));
+                }
             }
-            for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
-                CompilationUnit newCu = buildSplitUnit(cu, clazz);
-                Path outputRelative = relativeParent == null
-                    ? Path.of(clazz.getNameAsString() + ".java")
-                    : relativeParent.resolve(clazz.getNameAsString() + ".java");
-                outputs.add(new OutputFilePreview(outputRelative, newCu.toString()));
+            case SPLIT_OTHERS -> {
+                ClassOrInterfaceDeclaration primary = decision.primary();
+                ensurePublic(primary);
+
+                List<ClassOrInterfaceDeclaration> toMove = decision.topLevelClasses().stream()
+                    .filter(clazz -> clazz != primary)
+                    .toList();
+                for (ClassOrInterfaceDeclaration clazz : toMove) {
+                    ensurePublic(clazz);
+                }
+                for (ClassOrInterfaceDeclaration clazz : toMove) {
+                    CompilationUnit newCu = buildSplitUnit(cu, clazz);
+                    Path outputRelative = relativeParent == null
+                        ? Path.of(clazz.getNameAsString() + ".java")
+                        : relativeParent.resolve(clazz.getNameAsString() + ".java");
+                    outputs.add(new OutputFilePreview(outputRelative, newCu.toString()));
+                }
+                for (ClassOrInterfaceDeclaration clazz : toMove) {
+                    clazz.remove();
+                }
+                outputs.add(new OutputFilePreview(relative, cu.toString()));
             }
-            return outputs;
+            case NONE -> {
+                for (ClassOrInterfaceDeclaration clazz : decision.topLevelClasses()) {
+                    ensurePublic(clazz);
+                }
+                outputs.add(new OutputFilePreview(relative, cu.toString()));
+            }
         }
 
-        // Case 2: has a public class and additional top-level classes -> move non-primary classes.
-        if (hasPublicClass && topLevelClasses.size() > 1) {
-            ClassOrInterfaceDeclaration primary = topLevelClasses.stream()
-                .filter(ClassOrInterfaceDeclaration::isPublic)
-                .findFirst()
-                .orElse(topLevelClasses.get(0));
-            ensurePublic(primary);
-
-            List<ClassOrInterfaceDeclaration> toMove = topLevelClasses.stream()
-                .filter(clazz -> clazz != primary)
-                .toList();
-            for (ClassOrInterfaceDeclaration clazz : toMove) {
-                ensurePublic(clazz);
-            }
-            for (ClassOrInterfaceDeclaration clazz : toMove) {
-                CompilationUnit newCu = buildSplitUnit(cu, clazz);
-                Path outputRelative = relativeParent == null
-                    ? Path.of(clazz.getNameAsString() + ".java")
-                    : relativeParent.resolve(clazz.getNameAsString() + ".java");
-                outputs.add(new OutputFilePreview(outputRelative, newCu.toString()));
-            }
-            for (ClassOrInterfaceDeclaration clazz : toMove) {
-                clazz.remove();
-            }
-            outputs.add(new OutputFilePreview(relative, cu.toString()));
-            return outputs;
-        }
-
-        // Case 3: single class or no split needed -> keep file, ensure class is public.
-        for (ClassOrInterfaceDeclaration clazz : topLevelClasses) {
-            ensurePublic(clazz);
-        }
-        outputs.add(new OutputFilePreview(relative, cu.toString()));
         return outputs;
     }
 
