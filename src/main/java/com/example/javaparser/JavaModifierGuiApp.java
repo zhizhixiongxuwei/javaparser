@@ -1,6 +1,7 @@
 package com.example.javaparser;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -11,6 +12,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import io.github.palexdev.materialfx.theming.JavaFXThemes;
 import io.github.palexdev.materialfx.theming.MaterialFXStylesheets;
@@ -27,6 +30,7 @@ import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.Node;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
@@ -50,8 +54,10 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
+import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.scene.layout.GridPane;
 
@@ -81,6 +87,10 @@ public class JavaModifierGuiApp extends Application {
     private static final List<String> DIFF_ROW_STYLE_CLASSES = List.of(
         "diff-row-added", "diff-row-removed", "diff-row-changed", "diff-row-empty", "diff-row-same"
     );
+    private static final String NAV_BUTTON_ACTIVE_STYLE =
+        "-fx-background-color: #4a6cf7; -fx-text-fill: white; -fx-font-weight: bold;";
+    private static final String NAV_BUTTON_INACTIVE_STYLE =
+        "-fx-background-color: transparent; -fx-text-fill: -fx-text-base-color; -fx-font-weight: normal;";
 
     // Core services and persisted UI preferences.
     private final JavaModifierProcessor processor = new JavaModifierProcessor();
@@ -370,12 +380,44 @@ public class JavaModifierGuiApp extends Application {
         HBox bottomBox = new HBox(12, applyButton, applyAllButton, verboseCheckBox, splitControl, themeControl, spacer, statusLabel);
         bottomBox.setPadding(new Insets(10));
 
-        BorderPane root = new BorderPane();
-        root.setTop(topBox);
-        root.setCenter(splitPane);
-        root.setBottom(bottomBox);
+        BorderPane javaParserPage = new BorderPane();
+        javaParserPage.setTop(topBox);
+        javaParserPage.setCenter(splitPane);
+        javaParserPage.setBottom(bottomBox);
 
-        Scene scene = new Scene(root, 1000, 640);
+        BorderPane goClocPage = createGoClocPage(stage);
+        goClocPage.setVisible(false);
+        goClocPage.setManaged(false);
+
+        Button javaParserNavButton = new Button("JavaParser Tool");
+        javaParserNavButton.setMaxWidth(Double.MAX_VALUE);
+        Button goClocNavButton = new Button("GoCLOC Tool");
+        goClocNavButton.setMaxWidth(Double.MAX_VALUE);
+        applyNavButtonStyles(javaParserNavButton, goClocNavButton, true);
+
+        javaParserNavButton.setOnAction(event -> {
+            showOnly(javaParserPage, goClocPage);
+            applyNavButtonStyles(javaParserNavButton, goClocNavButton, true);
+            stage.setTitle("JavaParser Modifier Preview");
+        });
+        goClocNavButton.setOnAction(event -> {
+            showOnly(goClocPage, javaParserPage);
+            applyNavButtonStyles(javaParserNavButton, goClocNavButton, false);
+            stage.setTitle("GoCLOC Runner");
+        });
+
+        VBox navBox = new VBox(10, new Label("Tools"), javaParserNavButton, goClocNavButton);
+        navBox.setPadding(new Insets(10));
+        navBox.setMinWidth(180);
+        navBox.setStyle("-fx-border-color: -fx-box-border; -fx-border-width: 0 1 0 0;");
+
+        StackPane contentPane = new StackPane(javaParserPage, goClocPage);
+
+        BorderPane root = new BorderPane();
+        root.setLeft(navBox);
+        root.setCenter(contentPane);
+
+        Scene scene = new Scene(root, 1180, 700);
         applyTheme(scene, initialTheme);
         // Apply and persist theme changes.
         themeSelector.valueProperty().addListener((obs, oldValue, newValue) -> {
@@ -387,6 +429,401 @@ public class JavaModifierGuiApp extends Application {
         stage.setScene(scene);
         stage.show();
     }
+
+    /**
+     * Build a GoCLOC runner page that maps common CLI options to form fields.
+     */
+    private BorderPane createGoClocPage(Stage stage) {
+        TextField targetField = new TextField();
+        targetField.setPromptText("Directory or file path to scan");
+        Button chooseTargetDirButton = new Button("Choose Dir");
+        Button chooseTargetFileButton = new Button("Choose File");
+        Button runButton = new Button("Run gocloc");
+        HBox.setHgrow(targetField, Priority.ALWAYS);
+
+        ComboBox<String> outputTypeSelector = new ComboBox<>(FXCollections.observableArrayList(
+            "default", "json", "yaml", "csv", "tabular"
+        ));
+        outputTypeSelector.getSelectionModel().selectFirst();
+
+        TextField includeExtField = new TextField();
+        includeExtField.setPromptText("e.g. go,java,kt");
+        TextField excludeExtField = new TextField();
+        excludeExtField.setPromptText("e.g. md,json");
+        TextField includeLangField = new TextField();
+        includeLangField.setPromptText("e.g. Go,Java");
+        TextField excludeLangField = new TextField();
+        excludeLangField.setPromptText("e.g. Python");
+        TextField excludeDirField = new TextField();
+        excludeDirField.setPromptText("e.g. vendor,node_modules");
+        TextField excludePathField = new TextField();
+        excludePathField.setPromptText("exclude path regex");
+        TextField extraArgsField = new TextField();
+        extraArgsField.setPromptText("extra raw args, e.g. --debug");
+
+        CheckBox byFileCheckBox = new CheckBox("--by-file");
+        CheckBox byFileByLangCheckBox = new CheckBox("--by-file-by-lang");
+        CheckBox skipDuplicatedCheckBox = new CheckBox("--skip-duplicated");
+        CheckBox fullPathCheckBox = new CheckBox("--fullpath");
+
+        TextArea commandPreviewArea = new TextArea();
+        commandPreviewArea.setEditable(false);
+        commandPreviewArea.setWrapText(true);
+        commandPreviewArea.setPrefRowCount(3);
+        commandPreviewArea.setStyle("-fx-font-family: 'Consolas';");
+
+        TextArea outputArea = new TextArea();
+        outputArea.setEditable(false);
+        outputArea.setWrapText(false);
+        outputArea.setStyle("-fx-font-family: 'Consolas';");
+
+        Label goClocStatusLabel = new Label("Ready");
+
+        Runnable refreshCommandPreview = () -> commandPreviewArea.setText(renderCommand(buildGoClocCommand(
+            targetField.getText(),
+            outputTypeSelector.getValue(),
+            includeExtField.getText(),
+            excludeExtField.getText(),
+            includeLangField.getText(),
+            excludeLangField.getText(),
+            excludeDirField.getText(),
+            excludePathField.getText(),
+            byFileCheckBox.isSelected(),
+            byFileByLangCheckBox.isSelected(),
+            skipDuplicatedCheckBox.isSelected(),
+            fullPathCheckBox.isSelected(),
+            extraArgsField.getText()
+        )));
+
+        targetField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        outputTypeSelector.valueProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        includeExtField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        excludeExtField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        includeLangField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        excludeLangField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        excludeDirField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        excludePathField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        extraArgsField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        byFileCheckBox.selectedProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        byFileByLangCheckBox.selectedProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        skipDuplicatedCheckBox.selectedProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        fullPathCheckBox.selectedProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+
+        chooseTargetDirButton.setOnAction(event -> {
+            Path selected = chooseDirectory(stage, "Select directory for gocloc", null);
+            if (selected != null) {
+                targetField.setText(selected.toString());
+            }
+        });
+        chooseTargetFileButton.setOnAction(event -> {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle("Select file for gocloc");
+            File selected = chooser.showOpenDialog(stage);
+            if (selected != null) {
+                targetField.setText(selected.toPath().toString());
+            }
+        });
+        runButton.setOnAction(event -> {
+            String target = normalizeValue(targetField.getText());
+            if (target == null) {
+                goClocStatusLabel.setText("Please select a target path");
+                return;
+            }
+
+            List<String> command = buildGoClocCommand(
+                target,
+                outputTypeSelector.getValue(),
+                includeExtField.getText(),
+                excludeExtField.getText(),
+                includeLangField.getText(),
+                excludeLangField.getText(),
+                excludeDirField.getText(),
+                excludePathField.getText(),
+                byFileCheckBox.isSelected(),
+                byFileByLangCheckBox.isSelected(),
+                skipDuplicatedCheckBox.isSelected(),
+                fullPathCheckBox.isSelected(),
+                extraArgsField.getText()
+            );
+            commandPreviewArea.setText(renderCommand(command));
+            outputArea.clear();
+            runButton.setDisable(true);
+            goClocStatusLabel.setText("Running gocloc...");
+
+            Task<CommandExecutionResult> task = new Task<>() {
+                @Override
+                protected CommandExecutionResult call() {
+                    return runCommand(command);
+                }
+            };
+
+            task.setOnSucceeded(taskEvent -> {
+                CommandExecutionResult result = task.getValue();
+                outputArea.setText(result.output());
+                if (result.exitCode() == 0) {
+                    goClocStatusLabel.setText("gocloc finished successfully");
+                } else {
+                    goClocStatusLabel.setText("gocloc failed with exit code " + result.exitCode());
+                }
+                runButton.setDisable(false);
+            });
+
+            task.setOnFailed(taskEvent -> {
+                Throwable ex = task.getException();
+                outputArea.setText(ex == null ? "Unknown error" : ex.getMessage());
+                goClocStatusLabel.setText("gocloc execution failed");
+                runButton.setDisable(false);
+            });
+
+            Thread thread = new Thread(task, "gocloc-task");
+            thread.setDaemon(true);
+            thread.start();
+        });
+
+        HBox targetRow = new HBox(8, new Label("Target"), targetField, chooseTargetDirButton, chooseTargetFileButton, runButton);
+        targetRow.setAlignment(Pos.CENTER_LEFT);
+
+        GridPane optionsGrid = new GridPane();
+        optionsGrid.setHgap(8);
+        optionsGrid.setVgap(8);
+        ColumnConstraints optionLabelCol1 = new ColumnConstraints();
+        optionLabelCol1.setMinWidth(90);
+        ColumnConstraints optionValueCol1 = new ColumnConstraints();
+        optionValueCol1.setHgrow(Priority.ALWAYS);
+        ColumnConstraints optionLabelCol2 = new ColumnConstraints();
+        optionLabelCol2.setMinWidth(90);
+        ColumnConstraints optionValueCol2 = new ColumnConstraints();
+        optionValueCol2.setHgrow(Priority.ALWAYS);
+        optionsGrid.getColumnConstraints().addAll(optionLabelCol1, optionValueCol1, optionLabelCol2, optionValueCol2);
+
+        optionsGrid.add(new Label("Output type"), 0, 0);
+        optionsGrid.add(outputTypeSelector, 1, 0);
+        optionsGrid.add(new Label("Include ext"), 2, 0);
+        optionsGrid.add(includeExtField, 3, 0);
+
+        optionsGrid.add(new Label("Exclude ext"), 0, 1);
+        optionsGrid.add(excludeExtField, 1, 1);
+        optionsGrid.add(new Label("Include lang"), 2, 1);
+        optionsGrid.add(includeLangField, 3, 1);
+
+        optionsGrid.add(new Label("Exclude lang"), 0, 2);
+        optionsGrid.add(excludeLangField, 1, 2);
+        optionsGrid.add(new Label("Exclude dir"), 2, 2);
+        optionsGrid.add(excludeDirField, 3, 2);
+
+        optionsGrid.add(new Label("Exclude path"), 0, 3);
+        optionsGrid.add(excludePathField, 1, 3);
+        optionsGrid.add(new Label("Extra args"), 2, 3);
+        optionsGrid.add(extraArgsField, 3, 3);
+
+        HBox flagsRow = new HBox(16, byFileCheckBox, byFileByLangCheckBox, skipDuplicatedCheckBox, fullPathCheckBox);
+        flagsRow.setAlignment(Pos.CENTER_LEFT);
+
+        VBox topBox = new VBox(10, targetRow, optionsGrid, flagsRow);
+        topBox.setPadding(new Insets(10));
+
+        Label commandLabel = new Label("Command Preview");
+        commandLabel.setStyle("-fx-font-weight: bold;");
+        Label outputLabel = new Label("Output");
+        outputLabel.setStyle("-fx-font-weight: bold;");
+        VBox centerBox = new VBox(8, commandLabel, commandPreviewArea, outputLabel, outputArea);
+        centerBox.setPadding(new Insets(10));
+        VBox.setVgrow(outputArea, Priority.ALWAYS);
+
+        HBox bottomBox = new HBox(8, new Label("Status"), goClocStatusLabel);
+        bottomBox.setPadding(new Insets(10));
+        bottomBox.setAlignment(Pos.CENTER_LEFT);
+
+        BorderPane page = new BorderPane();
+        page.setTop(topBox);
+        page.setCenter(centerBox);
+        page.setBottom(bottomBox);
+
+        refreshCommandPreview.run();
+        return page;
+    }
+
+    /**
+     * Build a gocloc command from UI values.
+     */
+    private List<String> buildGoClocCommand(
+        String targetPath,
+        String outputType,
+        String includeExt,
+        String excludeExt,
+        String includeLang,
+        String excludeLang,
+        String excludeDir,
+        String excludePath,
+        boolean byFile,
+        boolean byFileByLang,
+        boolean skipDuplicated,
+        boolean fullPath,
+        String extraArgs
+    ) {
+        List<String> command = new ArrayList<>();
+        command.add("gocloc");
+
+        String normalizedOutputType = normalizeValue(outputType);
+        if (normalizedOutputType != null && !"default".equalsIgnoreCase(normalizedOutputType)) {
+            command.add("--output-type");
+            command.add(normalizedOutputType);
+        }
+
+        addFlagWithValue(command, "--include-ext", includeExt);
+        addFlagWithValue(command, "--exclude-ext", excludeExt);
+        addFlagWithValue(command, "--include-lang", includeLang);
+        addFlagWithValue(command, "--exclude-lang", excludeLang);
+        addFlagWithValue(command, "--exclude-dir", excludeDir);
+        addFlagWithValue(command, "--exclude", excludePath);
+
+        if (byFile) {
+            command.add("--by-file");
+        }
+        if (byFileByLang) {
+            command.add("--by-file-by-lang");
+        }
+        if (skipDuplicated) {
+            command.add("--skip-duplicated");
+        }
+        if (fullPath) {
+            command.add("--fullpath");
+        }
+
+        command.addAll(parseArgs(extraArgs));
+
+        String normalizedTargetPath = normalizeValue(targetPath);
+        if (normalizedTargetPath != null) {
+            command.add(normalizedTargetPath);
+        }
+        return command;
+    }
+
+    /**
+     * Add a key-value CLI flag when the value is non-empty.
+     */
+    private void addFlagWithValue(List<String> command, String flag, String value) {
+        String normalized = normalizeValue(value);
+        if (normalized != null) {
+            command.add(flag);
+            command.add(normalized);
+        }
+    }
+
+    /**
+     * Execute an external command and capture merged stdout/stderr output.
+     */
+    private CommandExecutionResult runCommand(List<String> command) {
+        Process process = null;
+        try {
+            ProcessBuilder builder = new ProcessBuilder(command);
+            builder.redirectErrorStream(true);
+            process = builder.start();
+            String output;
+            try (var stream = process.getInputStream()) {
+                output = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            int exitCode = process.waitFor();
+            return new CommandExecutionResult(exitCode, output);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return new CommandExecutionResult(-1, "Command interrupted: " + ex.getMessage());
+        } catch (Exception ex) {
+            return new CommandExecutionResult(
+                -1,
+                "Failed to run gocloc. Ensure `gocloc` is installed and available in PATH.\n" + ex.getMessage()
+            );
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
+        }
+    }
+
+    /**
+     * Parse raw extra arguments into tokens, supporting quoted values.
+     */
+    private static List<String> parseArgs(String rawArgs) {
+        String normalized = normalizeValue(rawArgs);
+        if (normalized == null) {
+            return List.of();
+        }
+
+        Pattern tokenPattern = Pattern.compile("\"([^\"]*)\"|'([^']*)'|(\\S+)");
+        Matcher matcher = tokenPattern.matcher(normalized);
+        List<String> tokens = new ArrayList<>();
+        while (matcher.find()) {
+            if (matcher.group(1) != null) {
+                tokens.add(matcher.group(1));
+            } else if (matcher.group(2) != null) {
+                tokens.add(matcher.group(2));
+            } else if (matcher.group(3) != null) {
+                tokens.add(matcher.group(3));
+            }
+        }
+        return tokens;
+    }
+
+    /**
+     * Render a full command as a display-friendly shell line.
+     */
+    private static String renderCommand(List<String> command) {
+        return command.stream()
+            .map(JavaModifierGuiApp::escapeTokenForDisplay)
+            .collect(Collectors.joining(" "));
+    }
+
+    /**
+     * Quote tokens that contain whitespace for better readability.
+     */
+    private static String escapeTokenForDisplay(String token) {
+        if (token == null || token.isEmpty()) {
+            return "\"\"";
+        }
+        if (token.contains(" ") || token.contains("\t")) {
+            return "\"" + token.replace("\"", "\\\"") + "\"";
+        }
+        return token;
+    }
+
+    /**
+     * Normalize blank text values to null.
+     */
+    private static String normalizeValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    /**
+     * Show one node and hide another in stacked page layouts.
+     */
+    private static void showOnly(Node shown, Node hidden) {
+        shown.setVisible(true);
+        shown.setManaged(true);
+        hidden.setVisible(false);
+        hidden.setManaged(false);
+    }
+
+    /**
+     * Keep left nav button visuals in sync with the selected page.
+     */
+    private static void applyNavButtonStyles(Button javaParserButton, Button goClocButton, boolean javaParserSelected) {
+        if (javaParserSelected) {
+            javaParserButton.setStyle(NAV_BUTTON_ACTIVE_STYLE);
+            goClocButton.setStyle(NAV_BUTTON_INACTIVE_STYLE);
+        } else {
+            javaParserButton.setStyle(NAV_BUTTON_INACTIVE_STYLE);
+            goClocButton.setStyle(NAV_BUTTON_ACTIVE_STYLE);
+        }
+    }
+
+    /**
+     * External command result payload.
+     */
+    private record CommandExecutionResult(int exitCode, String output) {}
 
     /**
      * Update the processor config from the rule checkboxes and invalidate the parser cache.
