@@ -75,6 +75,16 @@ mvn -DskipTests javafx:run
 
 主题选择会自动持久化。
 
+### GoCLOC 工具页
+
+- GoCLOC 页面已按 `gocloc-exe-cli` 的命令模型适配：
+  - `version`
+  - `language`
+  - `scan <path> [--format table|json] [--output <file>] [--workers N]`
+- 支持设置并持久化 **可执行文件路径**（可手动填写、文件选择器选择，或一键使用项目内置二进制）。
+- `scan` 支持目录/文件选择、`format`、`workers`、`extra args` 和 JSON 输出路径选择。
+- 页面会实时预览命令行，并展示执行输出与状态。
+
 ### 偏好持久化
 
 以下设置保存在 `~/.javaparser-modifier/gui.properties`，重启后自动恢复：
@@ -83,6 +93,7 @@ mvn -DskipTests javafx:run
 - 主题选择
 - 上次使用的输入目录
 - 上次使用的输出目录
+- GoCLOC 可执行文件路径
 
 ### 输出冲突处理
 

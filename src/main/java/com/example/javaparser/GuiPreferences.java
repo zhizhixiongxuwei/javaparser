@@ -21,6 +21,7 @@ public final class GuiPreferences {
     private static final String KEY_THEME = "ui.theme";
     private static final String KEY_INPUT_DIR = "dir.input";
     private static final String KEY_OUTPUT_DIR = "dir.output";
+    private static final String KEY_GOCLOC_EXECUTABLE = "gocloc.executable";
 
     private final Path configPath;
 
@@ -107,6 +108,32 @@ public final class GuiPreferences {
      */
     public void saveOutputDir(Path dir) {
         saveDirProperty(KEY_OUTPUT_DIR, dir);
+    }
+
+    /**
+     * Load the previously saved gocloc executable path, or fall back to the provided value.
+     */
+    public String loadGoClocExecutablePath(String fallback) {
+        Properties properties = loadProperties();
+        String value = properties.getProperty(KEY_GOCLOC_EXECUTABLE);
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        return value.trim();
+    }
+
+    /**
+     * Persist a gocloc executable path. Blank values remove the persisted key.
+     */
+    public void saveGoClocExecutablePath(String executablePath) {
+        Properties properties = loadProperties();
+        String normalized = executablePath == null ? null : executablePath.trim();
+        if (normalized == null || normalized.isEmpty()) {
+            properties.remove(KEY_GOCLOC_EXECUTABLE);
+        } else {
+            properties.setProperty(KEY_GOCLOC_EXECUTABLE, normalized);
+        }
+        saveProperties(properties);
     }
 
     private Path loadDirProperty(String key) {

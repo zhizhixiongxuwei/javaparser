@@ -431,40 +431,37 @@ public class JavaModifierGuiApp extends Application {
     }
 
     /**
-     * Build a GoCLOC runner page that maps common CLI options to form fields.
+     * Build a GoCLOC runner page aligned with the bundled gocloc-exe-cli skill.
      */
     private BorderPane createGoClocPage(Stage stage) {
+        String defaultExecutablePath = resolveDefaultGoClocExecutablePath();
+        String savedExecutablePath = preferences.loadGoClocExecutablePath(defaultExecutablePath);
+
+        TextField executableField = new TextField(savedExecutablePath);
+        executableField.setPromptText(defaultExecutablePath);
+        Button chooseExecutableButton = new Button("Choose Exe");
+        Button useBundledButton = new Button("Use Bundled");
+        HBox.setHgrow(executableField, Priority.ALWAYS);
+
         TextField targetField = new TextField();
         targetField.setPromptText("Directory or file path to scan");
         Button chooseTargetDirButton = new Button("Choose Dir");
         Button chooseTargetFileButton = new Button("Choose File");
-        Button runButton = new Button("Run gocloc");
         HBox.setHgrow(targetField, Priority.ALWAYS);
 
-        ComboBox<String> outputTypeSelector = new ComboBox<>(FXCollections.observableArrayList(
-            "default", "json", "yaml", "csv", "tabular"
-        ));
-        outputTypeSelector.getSelectionModel().selectFirst();
-
-        TextField includeExtField = new TextField();
-        includeExtField.setPromptText("e.g. go,java,kt");
-        TextField excludeExtField = new TextField();
-        excludeExtField.setPromptText("e.g. md,json");
-        TextField includeLangField = new TextField();
-        includeLangField.setPromptText("e.g. Go,Java");
-        TextField excludeLangField = new TextField();
-        excludeLangField.setPromptText("e.g. Python");
-        TextField excludeDirField = new TextField();
-        excludeDirField.setPromptText("e.g. vendor,node_modules");
-        TextField excludePathField = new TextField();
-        excludePathField.setPromptText("exclude path regex");
+        ComboBox<String> formatSelector = new ComboBox<>(FXCollections.observableArrayList("table", "json"));
+        formatSelector.getSelectionModel().selectFirst();
+        TextField outputFileField = new TextField();
+        outputFileField.setPromptText("JSON output file path (optional)");
+        Button chooseOutputFileButton = new Button("Choose Output");
+        TextField workersField = new TextField();
+        workersField.setPromptText("e.g. 8");
         TextField extraArgsField = new TextField();
-        extraArgsField.setPromptText("extra raw args, e.g. --debug");
+        extraArgsField.setPromptText("extra raw args");
 
-        CheckBox byFileCheckBox = new CheckBox("--by-file");
-        CheckBox byFileByLangCheckBox = new CheckBox("--by-file-by-lang");
-        CheckBox skipDuplicatedCheckBox = new CheckBox("--skip-duplicated");
-        CheckBox fullPathCheckBox = new CheckBox("--fullpath");
+        Button runVersionButton = new Button("Version");
+        Button runLanguageButton = new Button("Languages");
+        Button runScanButton = new Button("Scan");
 
         TextArea commandPreviewArea = new TextArea();
         commandPreviewArea.setEditable(false);
@@ -479,108 +476,126 @@ public class JavaModifierGuiApp extends Application {
 
         Label goClocStatusLabel = new Label("Ready");
 
-        Runnable refreshCommandPreview = () -> commandPreviewArea.setText(renderCommand(buildGoClocCommand(
+        Runnable refreshCommandPreview = () -> commandPreviewArea.setText(renderCommand(buildGoClocScanCommand(
+            executableField.getText(),
+            defaultExecutablePath,
             targetField.getText(),
-            outputTypeSelector.getValue(),
-            includeExtField.getText(),
-            excludeExtField.getText(),
-            includeLangField.getText(),
-            excludeLangField.getText(),
-            excludeDirField.getText(),
-            excludePathField.getText(),
-            byFileCheckBox.isSelected(),
-            byFileByLangCheckBox.isSelected(),
-            skipDuplicatedCheckBox.isSelected(),
-            fullPathCheckBox.isSelected(),
+            formatSelector.getValue(),
+            outputFileField.getText(),
+            workersField.getText(),
             extraArgsField.getText()
         )));
 
+        Runnable syncOutputControls = () -> {
+            boolean jsonOutput = "json".equalsIgnoreCase(formatSelector.getValue());
+            outputFileField.setDisable(!jsonOutput);
+            chooseOutputFileButton.setDisable(!jsonOutput);
+        };
+
+        executableField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
         targetField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
-        outputTypeSelector.valueProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
-        includeExtField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
-        excludeExtField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
-        includeLangField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
-        excludeLangField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
-        excludeDirField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
-        excludePathField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        formatSelector.valueProperty().addListener((obs, oldValue, newValue) -> {
+            syncOutputControls.run();
+            refreshCommandPreview.run();
+        });
+        outputFileField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        workersField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
         extraArgsField.textProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
-        byFileCheckBox.selectedProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
-        byFileByLangCheckBox.selectedProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
-        skipDuplicatedCheckBox.selectedProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
-        fullPathCheckBox.selectedProperty().addListener((obs, oldValue, newValue) -> refreshCommandPreview.run());
+        executableField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
+            if (!isFocused) {
+                preferences.saveGoClocExecutablePath(executableField.getText());
+            }
+        });
+
+        chooseExecutableButton.setOnAction(event -> {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle("Select gocloc executable");
+            configureChooserFromPath(chooser, executableField.getText());
+            File selected = chooser.showOpenDialog(stage);
+            if (selected != null) {
+                String executablePath = selected.toPath().toAbsolutePath().toString();
+                executableField.setText(executablePath);
+                preferences.saveGoClocExecutablePath(executablePath);
+            }
+        });
+
+        useBundledButton.setOnAction(event -> {
+            executableField.setText(defaultExecutablePath);
+            preferences.saveGoClocExecutablePath(defaultExecutablePath);
+        });
 
         chooseTargetDirButton.setOnAction(event -> {
-            Path selected = chooseDirectory(stage, "Select directory for gocloc", null);
+            Path selected = chooseDirectory(stage, "Select directory for gocloc scan", null);
             if (selected != null) {
                 targetField.setText(selected.toString());
             }
         });
+
         chooseTargetFileButton.setOnAction(event -> {
             FileChooser chooser = new FileChooser();
-            chooser.setTitle("Select file for gocloc");
+            chooser.setTitle("Select file for gocloc scan");
+            configureChooserFromPath(chooser, targetField.getText());
             File selected = chooser.showOpenDialog(stage);
             if (selected != null) {
                 targetField.setText(selected.toPath().toString());
             }
         });
-        runButton.setOnAction(event -> {
+
+        chooseOutputFileButton.setOnAction(event -> {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle("Select JSON output file");
+            chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON files", "*.json"));
+            configureChooserFromPath(chooser, outputFileField.getText());
+            File selected = chooser.showSaveDialog(stage);
+            if (selected != null) {
+                outputFileField.setText(selected.toPath().toString());
+            }
+        });
+
+        runVersionButton.setOnAction(event -> {
+            preferences.saveGoClocExecutablePath(executableField.getText());
+            List<String> command = buildGoClocCommand(executableField.getText(), defaultExecutablePath, "version");
+            executeGoClocCommand(command, commandPreviewArea, outputArea, goClocStatusLabel,
+                runVersionButton, runLanguageButton, runScanButton);
+        });
+
+        runLanguageButton.setOnAction(event -> {
+            preferences.saveGoClocExecutablePath(executableField.getText());
+            List<String> command = buildGoClocCommand(executableField.getText(), defaultExecutablePath, "language");
+            executeGoClocCommand(command, commandPreviewArea, outputArea, goClocStatusLabel,
+                runVersionButton, runLanguageButton, runScanButton);
+        });
+
+        runScanButton.setOnAction(event -> {
             String target = normalizeValue(targetField.getText());
             if (target == null) {
                 goClocStatusLabel.setText("Please select a target path");
                 return;
             }
 
-            List<String> command = buildGoClocCommand(
+            String workersError = validatePositiveInteger(workersField.getText(), "Workers");
+            if (workersError != null) {
+                goClocStatusLabel.setText(workersError);
+                return;
+            }
+
+            preferences.saveGoClocExecutablePath(executableField.getText());
+            List<String> command = buildGoClocScanCommand(
+                executableField.getText(),
+                defaultExecutablePath,
                 target,
-                outputTypeSelector.getValue(),
-                includeExtField.getText(),
-                excludeExtField.getText(),
-                includeLangField.getText(),
-                excludeLangField.getText(),
-                excludeDirField.getText(),
-                excludePathField.getText(),
-                byFileCheckBox.isSelected(),
-                byFileByLangCheckBox.isSelected(),
-                skipDuplicatedCheckBox.isSelected(),
-                fullPathCheckBox.isSelected(),
+                formatSelector.getValue(),
+                outputFileField.getText(),
+                workersField.getText(),
                 extraArgsField.getText()
             );
-            commandPreviewArea.setText(renderCommand(command));
-            outputArea.clear();
-            runButton.setDisable(true);
-            goClocStatusLabel.setText("Running gocloc...");
-
-            Task<CommandExecutionResult> task = new Task<>() {
-                @Override
-                protected CommandExecutionResult call() {
-                    return runCommand(command);
-                }
-            };
-
-            task.setOnSucceeded(taskEvent -> {
-                CommandExecutionResult result = task.getValue();
-                outputArea.setText(result.output());
-                if (result.exitCode() == 0) {
-                    goClocStatusLabel.setText("gocloc finished successfully");
-                } else {
-                    goClocStatusLabel.setText("gocloc failed with exit code " + result.exitCode());
-                }
-                runButton.setDisable(false);
-            });
-
-            task.setOnFailed(taskEvent -> {
-                Throwable ex = task.getException();
-                outputArea.setText(ex == null ? "Unknown error" : ex.getMessage());
-                goClocStatusLabel.setText("gocloc execution failed");
-                runButton.setDisable(false);
-            });
-
-            Thread thread = new Thread(task, "gocloc-task");
-            thread.setDaemon(true);
-            thread.start();
+            executeGoClocCommand(command, commandPreviewArea, outputArea, goClocStatusLabel,
+                runVersionButton, runLanguageButton, runScanButton);
         });
 
-        HBox targetRow = new HBox(8, new Label("Target"), targetField, chooseTargetDirButton, chooseTargetFileButton, runButton);
+        HBox executableRow = new HBox(8, new Label("Executable"), executableField, chooseExecutableButton, useBundledButton);
+        executableRow.setAlignment(Pos.CENTER_LEFT);
+        HBox targetRow = new HBox(8, new Label("Target"), targetField, chooseTargetDirButton, chooseTargetFileButton);
         targetRow.setAlignment(Pos.CENTER_LEFT);
 
         GridPane optionsGrid = new GridPane();
@@ -596,30 +611,22 @@ public class JavaModifierGuiApp extends Application {
         optionValueCol2.setHgrow(Priority.ALWAYS);
         optionsGrid.getColumnConstraints().addAll(optionLabelCol1, optionValueCol1, optionLabelCol2, optionValueCol2);
 
-        optionsGrid.add(new Label("Output type"), 0, 0);
-        optionsGrid.add(outputTypeSelector, 1, 0);
-        optionsGrid.add(new Label("Include ext"), 2, 0);
-        optionsGrid.add(includeExtField, 3, 0);
+        HBox outputFileRow = new HBox(8, outputFileField, chooseOutputFileButton);
+        HBox.setHgrow(outputFileField, Priority.ALWAYS);
 
-        optionsGrid.add(new Label("Exclude ext"), 0, 1);
-        optionsGrid.add(excludeExtField, 1, 1);
-        optionsGrid.add(new Label("Include lang"), 2, 1);
-        optionsGrid.add(includeLangField, 3, 1);
+        optionsGrid.add(new Label("Format"), 0, 0);
+        optionsGrid.add(formatSelector, 1, 0);
+        optionsGrid.add(new Label("Output"), 2, 0);
+        optionsGrid.add(outputFileRow, 3, 0);
+        optionsGrid.add(new Label("Workers"), 0, 1);
+        optionsGrid.add(workersField, 1, 1);
+        optionsGrid.add(new Label("Extra args"), 2, 1);
+        optionsGrid.add(extraArgsField, 3, 1);
 
-        optionsGrid.add(new Label("Exclude lang"), 0, 2);
-        optionsGrid.add(excludeLangField, 1, 2);
-        optionsGrid.add(new Label("Exclude dir"), 2, 2);
-        optionsGrid.add(excludeDirField, 3, 2);
+        HBox actionRow = new HBox(8, runVersionButton, runLanguageButton, runScanButton);
+        actionRow.setAlignment(Pos.CENTER_LEFT);
 
-        optionsGrid.add(new Label("Exclude path"), 0, 3);
-        optionsGrid.add(excludePathField, 1, 3);
-        optionsGrid.add(new Label("Extra args"), 2, 3);
-        optionsGrid.add(extraArgsField, 3, 3);
-
-        HBox flagsRow = new HBox(16, byFileCheckBox, byFileByLangCheckBox, skipDuplicatedCheckBox, fullPathCheckBox);
-        flagsRow.setAlignment(Pos.CENTER_LEFT);
-
-        VBox topBox = new VBox(10, targetRow, optionsGrid, flagsRow);
+        VBox topBox = new VBox(10, executableRow, targetRow, optionsGrid, actionRow);
         topBox.setPadding(new Insets(10));
 
         Label commandLabel = new Label("Command Preview");
@@ -639,75 +646,181 @@ public class JavaModifierGuiApp extends Application {
         page.setCenter(centerBox);
         page.setBottom(bottomBox);
 
+        syncOutputControls.run();
         refreshCommandPreview.run();
         return page;
     }
 
     /**
-     * Build a gocloc command from UI values.
+     * Build a simple gocloc command for non-scan subcommands.
      */
-    private List<String> buildGoClocCommand(
+    private List<String> buildGoClocCommand(String executablePath, String fallbackExecutablePath, String subCommand) {
+        List<String> command = new ArrayList<>();
+        command.add(resolveGoClocExecutablePath(executablePath, fallbackExecutablePath));
+        command.add(subCommand);
+        return command;
+    }
+
+    /**
+     * Build a gocloc scan command from UI values.
+     */
+    private List<String> buildGoClocScanCommand(
+        String executablePath,
+        String fallbackExecutablePath,
         String targetPath,
-        String outputType,
-        String includeExt,
-        String excludeExt,
-        String includeLang,
-        String excludeLang,
-        String excludeDir,
-        String excludePath,
-        boolean byFile,
-        boolean byFileByLang,
-        boolean skipDuplicated,
-        boolean fullPath,
+        String format,
+        String outputPath,
+        String workers,
         String extraArgs
     ) {
-        List<String> command = new ArrayList<>();
-        command.add("gocloc");
-
-        String normalizedOutputType = normalizeValue(outputType);
-        if (normalizedOutputType != null && !"default".equalsIgnoreCase(normalizedOutputType)) {
-            command.add("--output-type");
-            command.add(normalizedOutputType);
-        }
-
-        addFlagWithValue(command, "--include-ext", includeExt);
-        addFlagWithValue(command, "--exclude-ext", excludeExt);
-        addFlagWithValue(command, "--include-lang", includeLang);
-        addFlagWithValue(command, "--exclude-lang", excludeLang);
-        addFlagWithValue(command, "--exclude-dir", excludeDir);
-        addFlagWithValue(command, "--exclude", excludePath);
-
-        if (byFile) {
-            command.add("--by-file");
-        }
-        if (byFileByLang) {
-            command.add("--by-file-by-lang");
-        }
-        if (skipDuplicated) {
-            command.add("--skip-duplicated");
-        }
-        if (fullPath) {
-            command.add("--fullpath");
-        }
-
-        command.addAll(parseArgs(extraArgs));
+        List<String> command = buildGoClocCommand(executablePath, fallbackExecutablePath, "scan");
 
         String normalizedTargetPath = normalizeValue(targetPath);
         if (normalizedTargetPath != null) {
             command.add(normalizedTargetPath);
         }
+
+        String normalizedFormat = normalizeValue(format);
+        if (normalizedFormat != null) {
+            command.add("--format");
+            command.add(normalizedFormat);
+        }
+
+        String normalizedOutputPath = normalizeValue(outputPath);
+        if ("json".equalsIgnoreCase(normalizedFormat) && normalizedOutputPath != null) {
+            command.add("--output");
+            command.add(normalizedOutputPath);
+        }
+
+        String normalizedWorkers = normalizeValue(workers);
+        if (normalizedWorkers != null) {
+            command.add("--workers");
+            command.add(normalizedWorkers);
+        }
+
+        command.addAll(parseArgs(extraArgs));
         return command;
     }
 
     /**
-     * Add a key-value CLI flag when the value is non-empty.
+     * Resolve the executable path to run for gocloc.
      */
-    private void addFlagWithValue(List<String> command, String flag, String value) {
-        String normalized = normalizeValue(value);
-        if (normalized != null) {
-            command.add(flag);
-            command.add(normalized);
+    private String resolveGoClocExecutablePath(String executablePath, String fallbackExecutablePath) {
+        String configuredPath = normalizeValue(executablePath);
+        if (configuredPath != null) {
+            return configuredPath;
         }
+        return fallbackExecutablePath;
+    }
+
+    /**
+     * Resolve the default executable path, preferring the bundled binary in this project.
+     */
+    private String resolveDefaultGoClocExecutablePath() {
+        Path bundledPath = Path.of("gocloc-exe-cli", "assets", "bin", "gocloc").toAbsolutePath().normalize();
+        if (Files.isRegularFile(bundledPath)) {
+            return bundledPath.toString();
+        }
+        Path windowsBundledPath = Path.of("gocloc-exe-cli", "assets", "bin", "gocloc.exe").toAbsolutePath().normalize();
+        if (Files.isRegularFile(windowsBundledPath)) {
+            return windowsBundledPath.toString();
+        }
+        return "gocloc";
+    }
+
+    /**
+     * Set a file chooser initial directory/file name from a user-provided path string when possible.
+     */
+    private static void configureChooserFromPath(FileChooser chooser, String pathValue) {
+        String normalizedPath = normalizeValue(pathValue);
+        if (normalizedPath == null) {
+            return;
+        }
+        try {
+            Path path = Path.of(normalizedPath).toAbsolutePath().normalize();
+            Path initialDirectory = Files.isDirectory(path) ? path : path.getParent();
+            if (initialDirectory != null && Files.isDirectory(initialDirectory)) {
+                chooser.setInitialDirectory(initialDirectory.toFile());
+            }
+            if (!Files.isDirectory(path)) {
+                Path fileName = path.getFileName();
+                if (fileName != null) {
+                    chooser.setInitialFileName(fileName.toString());
+                }
+            }
+        } catch (Exception ignored) {
+            // Ignore invalid path values entered manually in the text field.
+        }
+    }
+
+    /**
+     * Validate that a text field contains a positive integer when non-empty.
+     */
+    private static String validatePositiveInteger(String value, String fieldName) {
+        String normalized = normalizeValue(value);
+        if (normalized == null) {
+            return null;
+        }
+        try {
+            int number = Integer.parseInt(normalized);
+            if (number <= 0) {
+                return fieldName + " must be greater than 0";
+            }
+            return null;
+        } catch (NumberFormatException ex) {
+            return fieldName + " must be a positive integer";
+        }
+    }
+
+    /**
+     * Execute a gocloc command asynchronously and update page widgets.
+     */
+    private void executeGoClocCommand(
+        List<String> command,
+        TextArea commandPreviewArea,
+        TextArea outputArea,
+        Label goClocStatusLabel,
+        Button... actionButtons
+    ) {
+        commandPreviewArea.setText(renderCommand(command));
+        outputArea.clear();
+        for (Button button : actionButtons) {
+            button.setDisable(true);
+        }
+        goClocStatusLabel.setText("Running gocloc...");
+
+        Task<CommandExecutionResult> task = new Task<>() {
+            @Override
+            protected CommandExecutionResult call() {
+                return runCommand(command);
+            }
+        };
+
+        task.setOnSucceeded(taskEvent -> {
+            CommandExecutionResult result = task.getValue();
+            outputArea.setText(result.output());
+            if (result.exitCode() == 0) {
+                goClocStatusLabel.setText("gocloc finished successfully");
+            } else {
+                goClocStatusLabel.setText("gocloc failed with exit code " + result.exitCode());
+            }
+            for (Button button : actionButtons) {
+                button.setDisable(false);
+            }
+        });
+
+        task.setOnFailed(taskEvent -> {
+            Throwable ex = task.getException();
+            outputArea.setText(ex == null ? "Unknown error" : ex.getMessage());
+            goClocStatusLabel.setText("gocloc execution failed");
+            for (Button button : actionButtons) {
+                button.setDisable(false);
+            }
+        });
+
+        Thread thread = new Thread(task, "gocloc-task");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     /**
@@ -731,7 +844,7 @@ public class JavaModifierGuiApp extends Application {
         } catch (Exception ex) {
             return new CommandExecutionResult(
                 -1,
-                "Failed to run gocloc. Ensure `gocloc` is installed and available in PATH.\n" + ex.getMessage()
+                "Failed to run gocloc. Check executable path and execution permissions.\n" + ex.getMessage()
             );
         } finally {
             if (process != null && process.isAlive()) {

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gocloc CLI"
+  short_description: "Run prebuilt gocloc binary to scan code metrics"
+  default_prompt: "Use $gocloc-exe-cli to scan this codebase and report total/code/comment/blank metrics with a concise interpretation."
