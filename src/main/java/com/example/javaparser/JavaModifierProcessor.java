@@ -228,6 +228,16 @@ public class JavaModifierProcessor {
         }
 
         CompilationUnit cu = result.getResult().get();
+        String packageName = resolvePackageName(cu);
+        if (shouldSkipByPackageFilter(packageName)) {
+            log.debug(
+                "Skipping {} by {} package filter, package={}",
+                sourceFile,
+                config.getPackageFilterMode(),
+                packageName == null ? "<default>" : packageName
+            );
+            return null;
+        }
         SplitDecision decision = determineSplit(cu);
 
         // Build a per-class plan for public modifier changes and splitting decisions.
@@ -364,6 +374,16 @@ public class JavaModifierProcessor {
         }
 
         CompilationUnit cu = result.getResult().get();
+        String packageName = resolvePackageName(cu);
+        if (shouldSkipByPackageFilter(packageName)) {
+            log.debug(
+                "Skipping {} by {} package filter, package={}",
+                sourceFile,
+                config.getPackageFilterMode(),
+                packageName == null ? "<default>" : packageName
+            );
+            return List.of();
+        }
         SplitDecision decision = determineSplit(cu);
 
         // Apply field modifier changes in-place before any splitting logic.
@@ -432,6 +452,68 @@ public class JavaModifierProcessor {
         }
         newCu.addType(clazz.clone());
         return newCu;
+    }
+
+    /**
+     * Resolve the declared package name or null for default package.
+     */
+    private String resolvePackageName(CompilationUnit cu) {
+        return cu.getPackageDeclaration()
+            .map(packageDeclaration -> packageDeclaration.getNameAsString())
+            .orElse(null);
+    }
+
+    /**
+     * @return true when the current package should be skipped by the active filter mode.
+     */
+    private boolean shouldSkipByPackageFilter(String packageName) {
+        ProcessorConfig.PackageFilterMode mode = config.getPackageFilterMode();
+        if (mode == ProcessorConfig.PackageFilterMode.INCLUDE) {
+            return !isIncludedPackage(packageName);
+        }
+        return isExcludedPackage(packageName);
+    }
+
+    /**
+     * @return true when the package name matches one of the configured exclusions.
+     */
+    private boolean isExcludedPackage(String packageName) {
+        if (packageName == null || packageName.isBlank()) {
+            return false;
+        }
+        for (String excludedPackage : config.getExcludedPackages()) {
+            if (packageMatches(packageName, excludedPackage)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @return true when the package name matches one of the configured inclusions.
+     */
+    private boolean isIncludedPackage(String packageName) {
+        if (packageName == null || packageName.isBlank()) {
+            return false;
+        }
+        for (String includedPackage : config.getIncludedPackages()) {
+            if (packageMatches(packageName, includedPackage)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Match package names by full segment boundaries (not arbitrary substrings).
+     */
+    private boolean packageMatches(String packageName, String filterPackage) {
+        if (packageName.equals(filterPackage)) {
+            return true;
+        }
+        return packageName.startsWith(filterPackage + ".")
+            || packageName.endsWith("." + filterPackage)
+            || packageName.contains("." + filterPackage + ".");
     }
 
     /**

@@ -41,12 +41,14 @@ import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.RadioButton;
 import javafx.scene.control.Slider;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import javafx.scene.layout.ColumnConstraints;
@@ -83,6 +85,7 @@ public class JavaModifierGuiApp extends Application {
         new ThemeOption("High Contrast", "/styles/theme-contrast.css"),
         new ThemeOption("Warm", "/styles/theme-warm.css")
     );
+    private static final Pattern PACKAGE_FILTER_SEPARATOR_PATTERN = Pattern.compile("[,;\\s]+");
 
     private static final List<String> DIFF_ROW_STYLE_CLASSES = List.of(
         "diff-row-added", "diff-row-removed", "diff-row-changed", "diff-row-empty", "diff-row-same"
@@ -195,10 +198,98 @@ public class JavaModifierGuiApp extends Application {
         fieldToPublicCb.setSelected(true);
         CheckBox splitFilesCb = new CheckBox("Split files");
         splitFilesCb.setSelected(true);
+        RadioButton excludePackageModeRb = new RadioButton("Exclude");
+        RadioButton includePackageModeRb = new RadioButton("Include");
+        ToggleGroup packageFilterModeGroup = new ToggleGroup();
+        excludePackageModeRb.setToggleGroup(packageFilterModeGroup);
+        includePackageModeRb.setToggleGroup(packageFilterModeGroup);
+        excludePackageModeRb.setSelected(true);
+        TextField excludedPackagesField = new TextField();
+        excludedPackagesField.setPromptText("e.g. temp.internal, legacy.generated");
+        TextField includedPackagesField = new TextField();
+        includedPackagesField.setPromptText("e.g. com.myapp, org.demo.feature");
+        syncPackageFilterInputState(excludedPackagesField, includedPackagesField, includePackageModeRb.isSelected());
 
-        classToPublicCb.selectedProperty().addListener((obs, oldVal, newVal) -> updateProcessorConfig(classToPublicCb, fieldToPublicCb, splitFilesCb));
-        fieldToPublicCb.selectedProperty().addListener((obs, oldVal, newVal) -> updateProcessorConfig(classToPublicCb, fieldToPublicCb, splitFilesCb));
-        splitFilesCb.selectedProperty().addListener((obs, oldVal, newVal) -> updateProcessorConfig(classToPublicCb, fieldToPublicCb, splitFilesCb));
+        classToPublicCb.selectedProperty().addListener(
+            (obs, oldVal, newVal) -> updateProcessorConfig(
+                classToPublicCb,
+                fieldToPublicCb,
+                splitFilesCb,
+                excludePackageModeRb,
+                includePackageModeRb,
+                excludedPackagesField,
+                includedPackagesField
+            )
+        );
+        fieldToPublicCb.selectedProperty().addListener(
+            (obs, oldVal, newVal) -> updateProcessorConfig(
+                classToPublicCb,
+                fieldToPublicCb,
+                splitFilesCb,
+                excludePackageModeRb,
+                includePackageModeRb,
+                excludedPackagesField,
+                includedPackagesField
+            )
+        );
+        splitFilesCb.selectedProperty().addListener(
+            (obs, oldVal, newVal) -> updateProcessorConfig(
+                classToPublicCb,
+                fieldToPublicCb,
+                splitFilesCb,
+                excludePackageModeRb,
+                includePackageModeRb,
+                excludedPackagesField,
+                includedPackagesField
+            )
+        );
+        packageFilterModeGroup.selectedToggleProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal == null) {
+                excludePackageModeRb.setSelected(true);
+                return;
+            }
+            syncPackageFilterInputState(excludedPackagesField, includedPackagesField, includePackageModeRb.isSelected());
+            updateProcessorConfig(
+                classToPublicCb,
+                fieldToPublicCb,
+                splitFilesCb,
+                excludePackageModeRb,
+                includePackageModeRb,
+                excludedPackagesField,
+                includedPackagesField
+            );
+        });
+        excludedPackagesField.textProperty().addListener(
+            (obs, oldVal, newVal) -> updateProcessorConfig(
+                classToPublicCb,
+                fieldToPublicCb,
+                splitFilesCb,
+                excludePackageModeRb,
+                includePackageModeRb,
+                excludedPackagesField,
+                includedPackagesField
+            )
+        );
+        includedPackagesField.textProperty().addListener(
+            (obs, oldVal, newVal) -> updateProcessorConfig(
+                classToPublicCb,
+                fieldToPublicCb,
+                splitFilesCb,
+                excludePackageModeRb,
+                includePackageModeRb,
+                excludedPackagesField,
+                includedPackagesField
+            )
+        );
+        updateProcessorConfig(
+            classToPublicCb,
+            fieldToPublicCb,
+            splitFilesCb,
+            excludePackageModeRb,
+            includePackageModeRb,
+            excludedPackagesField,
+            includedPackagesField
+        );
 
         inputButton.setOnAction(event -> {
             Path selected = chooseDirectory(stage, "Select input directory", inputDir);
@@ -329,8 +420,16 @@ public class JavaModifierGuiApp extends Application {
         HBox.setHgrow(outputField, Priority.ALWAYS);
         HBox rulesRow = new HBox(12, new Label("Rules"), classToPublicCb, fieldToPublicCb, splitFilesCb);
         rulesRow.setAlignment(Pos.CENTER_LEFT);
+        HBox packageModeRow = new HBox(12, new Label("Package filter"), excludePackageModeRb, includePackageModeRb);
+        packageModeRow.setAlignment(Pos.CENTER_LEFT);
+        HBox packageFilterRow = new HBox(8, new Label("Exclude packages"), excludedPackagesField);
+        HBox.setHgrow(excludedPackagesField, Priority.ALWAYS);
+        packageFilterRow.setAlignment(Pos.CENTER_LEFT);
+        HBox includeFilterRow = new HBox(8, new Label("Include packages"), includedPackagesField);
+        HBox.setHgrow(includedPackagesField, Priority.ALWAYS);
+        includeFilterRow.setAlignment(Pos.CENTER_LEFT);
 
-        VBox topBox = new VBox(8, inputRow, outputRow, rulesRow);
+        VBox topBox = new VBox(8, inputRow, outputRow, rulesRow, packageModeRow, packageFilterRow, includeFilterRow);
         topBox.setPadding(new Insets(10));
 
         HBox fileFilterRow = new HBox(8, filterField, selectAllCb);
@@ -374,10 +473,9 @@ public class JavaModifierGuiApp extends Application {
         splitPane.setDividerPositions(0.35);
 
         HBox splitControl = new HBox(6, new Label("Diff split"), splitSlider);
-        HBox themeControl = new HBox(6, new Label("Theme"), themeSelector);
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox bottomBox = new HBox(12, applyButton, applyAllButton, verboseCheckBox, splitControl, themeControl, spacer, statusLabel);
+        HBox bottomBox = new HBox(12, applyButton, applyAllButton, verboseCheckBox, splitControl, spacer, statusLabel);
         bottomBox.setPadding(new Insets(10));
 
         BorderPane javaParserPage = new BorderPane();
@@ -406,9 +504,17 @@ public class JavaModifierGuiApp extends Application {
             stage.setTitle("GoCLOC Runner");
         });
 
-        VBox navBox = new VBox(10, new Label("Tools"), javaParserNavButton, goClocNavButton);
+        Label toolsLabel = new Label("Tools");
+        toolsLabel.setStyle("-fx-font-weight: bold;");
+        HBox themeControl = new HBox(6, new Label("Theme"), themeSelector);
+        themeControl.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(themeSelector, Priority.ALWAYS);
+        Region navSpacer = new Region();
+        VBox.setVgrow(navSpacer, Priority.ALWAYS);
+
+        VBox navBox = new VBox(10, toolsLabel, javaParserNavButton, goClocNavButton, navSpacer, themeControl);
         navBox.setPadding(new Insets(10));
-        navBox.setMinWidth(180);
+        navBox.setMinWidth(220);
         navBox.setStyle("-fx-border-color: -fx-box-border; -fx-border-width: 0 1 0 0;");
 
         StackPane contentPane = new StackPane(javaParserPage, goClocPage);
@@ -941,12 +1047,57 @@ public class JavaModifierGuiApp extends Application {
     /**
      * Update the processor config from the rule checkboxes and invalidate the parser cache.
      */
-    private void updateProcessorConfig(CheckBox classToPublicCb, CheckBox fieldToPublicCb, CheckBox splitFilesCb) {
+    private void updateProcessorConfig(
+        CheckBox classToPublicCb,
+        CheckBox fieldToPublicCb,
+        CheckBox splitFilesCb,
+        RadioButton excludePackageModeRb,
+        RadioButton includePackageModeRb,
+        TextField excludedPackagesField,
+        TextField includedPackagesField
+    ) {
         ProcessorConfig config = processor.getConfig();
         config.setClassToPublic(classToPublicCb.isSelected());
         config.setFieldToPublic(fieldToPublicCb.isSelected());
         config.setSplitFiles(splitFilesCb.isSelected());
+        if (includePackageModeRb.isSelected()) {
+            config.setPackageFilterMode(ProcessorConfig.PackageFilterMode.INCLUDE);
+        } else if (excludePackageModeRb.isSelected()) {
+            config.setPackageFilterMode(ProcessorConfig.PackageFilterMode.EXCLUDE);
+        } else {
+            config.setPackageFilterMode(ProcessorConfig.PackageFilterMode.EXCLUDE);
+        }
+        config.setExcludedPackages(parsePackageFilters(excludedPackagesField.getText()));
+        config.setIncludedPackages(parsePackageFilters(includedPackagesField.getText()));
         processor.invalidateCache();
+    }
+
+    /**
+     * Enable only one package filter input at a time to keep include/exclude mutually exclusive.
+     */
+    private static void syncPackageFilterInputState(
+        TextField excludedPackagesField,
+        TextField includedPackagesField,
+        boolean includeMode
+    ) {
+        excludedPackagesField.setDisable(includeMode);
+        includedPackagesField.setDisable(!includeMode);
+    }
+
+    /**
+     * Parse package filters from comma/semicolon/whitespace separated text.
+     */
+    private static List<String> parsePackageFilters(String rawValue) {
+        String normalized = normalizeValue(rawValue);
+        if (normalized == null) {
+            return List.of();
+        }
+        return PACKAGE_FILTER_SEPARATOR_PATTERN
+            .splitAsStream(normalized)
+            .map(String::trim)
+            .filter(value -> !value.isEmpty())
+            .distinct()
+            .toList();
     }
 
     /**
